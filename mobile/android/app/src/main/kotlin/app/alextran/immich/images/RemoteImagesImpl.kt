@@ -277,8 +277,16 @@ private class CronetImageFetcher : ImageFetcher {
             ensureHeadroom()
             wrapRemaining()
           }
-        } else {
+        } else if (byteBuffer.hasRemaining()) {
           wrapped
+        } else {
+          // Content exceeded Content-Length; switch to growable buffer path
+          buffer!!.advance(byteBuffer.position())
+          wrapped = null
+          buffer!!.run {
+            ensureHeadroom()
+            wrapRemaining()
+          }
         }
         request.read(buf)
       } catch (e: Exception) {
