@@ -26,6 +26,7 @@ typedef $$LocalAssetEntityTableCreateCompanionBuilder =
       i0.Value<double?> latitude,
       i0.Value<double?> longitude,
       i0.Value<i2.AssetPlaybackStyle> playbackStyle,
+      i0.Value<bool> isEdited,
     });
 typedef $$LocalAssetEntityTableUpdateCompanionBuilder =
     i1.LocalAssetEntityCompanion Function({
@@ -45,6 +46,7 @@ typedef $$LocalAssetEntityTableUpdateCompanionBuilder =
       i0.Value<double?> latitude,
       i0.Value<double?> longitude,
       i0.Value<i2.AssetPlaybackStyle> playbackStyle,
+      i0.Value<bool> isEdited,
     });
 
 class $$LocalAssetEntityTableFilterComposer
@@ -141,6 +143,11 @@ class $$LocalAssetEntityTableFilterComposer
     column: $table.playbackStyle,
     builder: (column) => i0.ColumnWithTypeConverterFilters(column),
   );
+
+  i0.ColumnFilters<bool> get isEdited => $composableBuilder(
+    column: $table.isEdited,
+    builder: (column) => i0.ColumnFilters(column),
+  );
 }
 
 class $$LocalAssetEntityTableOrderingComposer
@@ -231,6 +238,11 @@ class $$LocalAssetEntityTableOrderingComposer
     column: $table.playbackStyle,
     builder: (column) => i0.ColumnOrderings(column),
   );
+
+  i0.ColumnOrderings<bool> get isEdited => $composableBuilder(
+    column: $table.isEdited,
+    builder: (column) => i0.ColumnOrderings(column),
+  );
 }
 
 class $$LocalAssetEntityTableAnnotationComposer
@@ -300,6 +312,9 @@ class $$LocalAssetEntityTableAnnotationComposer
     column: $table.playbackStyle,
     builder: (column) => column,
   );
+
+  i0.GeneratedColumn<bool> get isEdited =>
+      $composableBuilder(column: $table.isEdited, builder: (column) => column);
 }
 
 class $$LocalAssetEntityTableTableManager
@@ -359,6 +374,7 @@ class $$LocalAssetEntityTableTableManager
                 i0.Value<double?> longitude = const i0.Value.absent(),
                 i0.Value<i2.AssetPlaybackStyle> playbackStyle =
                     const i0.Value.absent(),
+                i0.Value<bool> isEdited = const i0.Value.absent(),
               }) => i1.LocalAssetEntityCompanion(
                 name: name,
                 type: type,
@@ -376,6 +392,7 @@ class $$LocalAssetEntityTableTableManager
                 latitude: latitude,
                 longitude: longitude,
                 playbackStyle: playbackStyle,
+                isEdited: isEdited,
               ),
           createCompanionCallback:
               ({
@@ -396,6 +413,7 @@ class $$LocalAssetEntityTableTableManager
                 i0.Value<double?> longitude = const i0.Value.absent(),
                 i0.Value<i2.AssetPlaybackStyle> playbackStyle =
                     const i0.Value.absent(),
+                i0.Value<bool> isEdited = const i0.Value.absent(),
               }) => i1.LocalAssetEntityCompanion.insert(
                 name: name,
                 type: type,
@@ -413,6 +431,7 @@ class $$LocalAssetEntityTableTableManager
                 latitude: latitude,
                 longitude: longitude,
                 playbackStyle: playbackStyle,
+                isEdited: isEdited,
               ),
           withReferenceMapper: (p0) => p0
               .map((e) => (e.readTable(table), i0.BaseReferences(db, table, e)))
@@ -637,6 +656,21 @@ class $LocalAssetEntityTable extends i3.LocalAssetEntity
       ).withConverter<i2.AssetPlaybackStyle>(
         i1.$LocalAssetEntityTable.$converterplaybackStyle,
       );
+  static const i0.VerificationMeta _isEditedMeta = const i0.VerificationMeta(
+    'isEdited',
+  );
+  @override
+  late final i0.GeneratedColumn<bool> isEdited = i0.GeneratedColumn<bool>(
+    'is_edited',
+    aliasedName,
+    false,
+    type: i0.DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: i0.GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_edited" IN (0, 1))',
+    ),
+    defaultValue: const i4.Constant(false),
+  );
   @override
   List<i0.GeneratedColumn> get $columns => [
     name,
@@ -655,6 +689,7 @@ class $LocalAssetEntityTable extends i3.LocalAssetEntity
     latitude,
     longitude,
     playbackStyle,
+    isEdited,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -762,6 +797,12 @@ class $LocalAssetEntityTable extends i3.LocalAssetEntity
         longitude.isAcceptableOrUnknown(data['longitude']!, _longitudeMeta),
       );
     }
+    if (data.containsKey('is_edited')) {
+      context.handle(
+        _isEditedMeta,
+        isEdited.isAcceptableOrUnknown(data['is_edited']!, _isEditedMeta),
+      );
+    }
     return context;
   }
 
@@ -842,6 +883,10 @@ class $LocalAssetEntityTable extends i3.LocalAssetEntity
           data['${effectivePrefix}playback_style'],
         )!,
       ),
+      isEdited: attachedDatabase.typeMapping.read(
+        i0.DriftSqlType.bool,
+        data['${effectivePrefix}is_edited'],
+      )!,
     );
   }
 
@@ -880,6 +925,7 @@ class LocalAssetEntityData extends i0.DataClass
   final double? latitude;
   final double? longitude;
   final i2.AssetPlaybackStyle playbackStyle;
+  final bool isEdited;
   const LocalAssetEntityData({
     required this.name,
     required this.type,
@@ -897,6 +943,7 @@ class LocalAssetEntityData extends i0.DataClass
     this.latitude,
     this.longitude,
     required this.playbackStyle,
+    required this.isEdited,
   });
   @override
   Map<String, i0.Expression> toColumns(bool nullToAbsent) {
@@ -941,6 +988,7 @@ class LocalAssetEntityData extends i0.DataClass
         i1.$LocalAssetEntityTable.$converterplaybackStyle.toSql(playbackStyle),
       );
     }
+    map['is_edited'] = i0.Variable<bool>(isEdited);
     return map;
   }
 
@@ -970,6 +1018,7 @@ class LocalAssetEntityData extends i0.DataClass
       playbackStyle: i1.$LocalAssetEntityTable.$converterplaybackStyle.fromJson(
         serializer.fromJson<int>(json['playbackStyle']),
       ),
+      isEdited: serializer.fromJson<bool>(json['isEdited']),
     );
   }
   @override
@@ -996,6 +1045,7 @@ class LocalAssetEntityData extends i0.DataClass
       'playbackStyle': serializer.toJson<int>(
         i1.$LocalAssetEntityTable.$converterplaybackStyle.toJson(playbackStyle),
       ),
+      'isEdited': serializer.toJson<bool>(isEdited),
     };
   }
 
@@ -1016,6 +1066,7 @@ class LocalAssetEntityData extends i0.DataClass
     i0.Value<double?> latitude = const i0.Value.absent(),
     i0.Value<double?> longitude = const i0.Value.absent(),
     i2.AssetPlaybackStyle? playbackStyle,
+    bool? isEdited,
   }) => i1.LocalAssetEntityData(
     name: name ?? this.name,
     type: type ?? this.type,
@@ -1037,6 +1088,7 @@ class LocalAssetEntityData extends i0.DataClass
     latitude: latitude.present ? latitude.value : this.latitude,
     longitude: longitude.present ? longitude.value : this.longitude,
     playbackStyle: playbackStyle ?? this.playbackStyle,
+    isEdited: isEdited ?? this.isEdited,
   );
   LocalAssetEntityData copyWithCompanion(i1.LocalAssetEntityCompanion data) {
     return LocalAssetEntityData(
@@ -1066,6 +1118,7 @@ class LocalAssetEntityData extends i0.DataClass
       playbackStyle: data.playbackStyle.present
           ? data.playbackStyle.value
           : this.playbackStyle,
+      isEdited: data.isEdited.present ? data.isEdited.value : this.isEdited,
     );
   }
 
@@ -1087,7 +1140,8 @@ class LocalAssetEntityData extends i0.DataClass
           ..write('adjustmentTime: $adjustmentTime, ')
           ..write('latitude: $latitude, ')
           ..write('longitude: $longitude, ')
-          ..write('playbackStyle: $playbackStyle')
+          ..write('playbackStyle: $playbackStyle, ')
+          ..write('isEdited: $isEdited')
           ..write(')'))
         .toString();
   }
@@ -1110,6 +1164,7 @@ class LocalAssetEntityData extends i0.DataClass
     latitude,
     longitude,
     playbackStyle,
+    isEdited,
   );
   @override
   bool operator ==(Object other) =>
@@ -1130,7 +1185,8 @@ class LocalAssetEntityData extends i0.DataClass
           other.adjustmentTime == this.adjustmentTime &&
           other.latitude == this.latitude &&
           other.longitude == this.longitude &&
-          other.playbackStyle == this.playbackStyle);
+          other.playbackStyle == this.playbackStyle &&
+          other.isEdited == this.isEdited);
 }
 
 class LocalAssetEntityCompanion
@@ -1151,6 +1207,7 @@ class LocalAssetEntityCompanion
   final i0.Value<double?> latitude;
   final i0.Value<double?> longitude;
   final i0.Value<i2.AssetPlaybackStyle> playbackStyle;
+  final i0.Value<bool> isEdited;
   const LocalAssetEntityCompanion({
     this.name = const i0.Value.absent(),
     this.type = const i0.Value.absent(),
@@ -1168,6 +1225,7 @@ class LocalAssetEntityCompanion
     this.latitude = const i0.Value.absent(),
     this.longitude = const i0.Value.absent(),
     this.playbackStyle = const i0.Value.absent(),
+    this.isEdited = const i0.Value.absent(),
   });
   LocalAssetEntityCompanion.insert({
     required String name,
@@ -1186,6 +1244,7 @@ class LocalAssetEntityCompanion
     this.latitude = const i0.Value.absent(),
     this.longitude = const i0.Value.absent(),
     this.playbackStyle = const i0.Value.absent(),
+    this.isEdited = const i0.Value.absent(),
   }) : name = i0.Value(name),
        type = i0.Value(type),
        id = i0.Value(id);
@@ -1206,6 +1265,7 @@ class LocalAssetEntityCompanion
     i0.Expression<double>? latitude,
     i0.Expression<double>? longitude,
     i0.Expression<int>? playbackStyle,
+    i0.Expression<bool>? isEdited,
   }) {
     return i0.RawValuesInsertable({
       if (name != null) 'name': name,
@@ -1224,6 +1284,7 @@ class LocalAssetEntityCompanion
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
       if (playbackStyle != null) 'playback_style': playbackStyle,
+      if (isEdited != null) 'is_edited': isEdited,
     });
   }
 
@@ -1244,6 +1305,7 @@ class LocalAssetEntityCompanion
     i0.Value<double?>? latitude,
     i0.Value<double?>? longitude,
     i0.Value<i2.AssetPlaybackStyle>? playbackStyle,
+    i0.Value<bool>? isEdited,
   }) {
     return i1.LocalAssetEntityCompanion(
       name: name ?? this.name,
@@ -1262,6 +1324,7 @@ class LocalAssetEntityCompanion
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       playbackStyle: playbackStyle ?? this.playbackStyle,
+      isEdited: isEdited ?? this.isEdited,
     );
   }
 
@@ -1322,6 +1385,9 @@ class LocalAssetEntityCompanion
         ),
       );
     }
+    if (isEdited.present) {
+      map['is_edited'] = i0.Variable<bool>(isEdited.value);
+    }
     return map;
   }
 
@@ -1343,7 +1409,8 @@ class LocalAssetEntityCompanion
           ..write('adjustmentTime: $adjustmentTime, ')
           ..write('latitude: $latitude, ')
           ..write('longitude: $longitude, ')
-          ..write('playbackStyle: $playbackStyle')
+          ..write('playbackStyle: $playbackStyle, ')
+          ..write('isEdited: $isEdited')
           ..write(')'))
         .toString();
   }

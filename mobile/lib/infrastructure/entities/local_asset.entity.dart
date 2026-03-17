@@ -27,6 +27,8 @@ class LocalAssetEntity extends Table with DriftDefaultsMixin, AssetEntityMixin {
 
   IntColumn get playbackStyle => intEnum<AssetPlaybackStyle>().withDefault(const Constant(0))();
 
+  BoolColumn get isEdited => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -50,6 +52,6 @@ extension LocalAssetEntityDataDomainExtension on LocalAssetEntityData {
     latitude: latitude,
     longitude: longitude,
     cloudId: iCloudId,
-    isEdited: false,
+    isEdited: isEdited,
   );
 }

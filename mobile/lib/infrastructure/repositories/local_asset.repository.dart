@@ -48,6 +48,14 @@ class DriftLocalAssetRepository extends DriftDatabaseRepository {
 
   Stream<LocalAsset?> watch(String id) => _assetSelectable(id).watchSingleOrNull();
 
+  Future<void> updateIsEdited(String id, {DateTime? createdAt}) {
+    return (_db.update(_db.localAssetEntity)..where((e) => e.id.equals(id)))
+        .write(LocalAssetEntityCompanion(
+          isEdited: const Value(true),
+          createdAt: createdAt != null ? Value(createdAt) : const Value.absent(),
+        ));
+  }
+
   Future<void> updateHashes(Map<String, String> hashes) {
     if (hashes.isEmpty) {
       return Future.value();
