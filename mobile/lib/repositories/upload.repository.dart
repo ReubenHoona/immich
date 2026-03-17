@@ -95,6 +95,24 @@ class UploadRepository {
     required Completer<void>? cancelToken,
     void Function(int bytes, int totalBytes)? onProgress,
     required String logContext,
+  }) => _sendUpload(
+    file: file,
+    originalFileName: originalFileName,
+    fields: fields,
+    cancelToken: cancelToken,
+    onProgress: onProgress,
+    logContext: logContext,
+    retryOnBrokenPipe: true,
+  );
+
+  Future<UploadResult> _sendUpload({
+    required File file,
+    required String originalFileName,
+    required Map<String, String> fields,
+    required Completer<void>? cancelToken,
+    void Function(int bytes, int totalBytes)? onProgress,
+    required String logContext,
+    required bool retryOnBrokenPipe,
   }) async {
     final String savedEndpoint = Store.get(StoreKey.serverEndpoint);
     final baseRequest = ProgressMultipartRequest(
@@ -144,6 +162,18 @@ class UploadRepository {
       logger.warning("Upload $logContext was cancelled");
       return UploadResult.cancelled();
     } catch (error, stackTrace) {
+      if (retryOnBrokenPipe && error.toString().contains('Broken pipe')) {
+        logger.warning("Broken pipe on $logContext — retrying with fresh connection");
+        return _sendUpload(
+          file: file,
+          originalFileName: originalFileName,
+          fields: fields,
+          cancelToken: cancelToken,
+          onProgress: onProgress,
+          logContext: logContext,
+          retryOnBrokenPipe: false,
+        );
+      }
       logger.warning("Error uploading $logContext: ${error.toString()}: $stackTrace");
       return UploadResult.error(errorMessage: error.toString());
     }
