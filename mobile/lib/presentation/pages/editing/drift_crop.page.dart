@@ -9,7 +9,11 @@ import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
 import 'package:immich_mobile/extensions/build_context_extensions.dart';
 import 'package:immich_mobile/routing/router.dart';
 import 'package:immich_mobile/utils/hooks/crop_controller_hook.dart';
+import 'package:immich_mobile/widgets/common/immich_toast.dart';
 import 'package:immich_ui/immich_ui.dart';
+import 'package:logging/logging.dart';
+
+final _log = Logger("DriftCropImagePage");
 
 /// A widget for cropping an image.
 /// This widget uses [HookWidget] to manage its lifecycle and state. It allows
@@ -38,8 +42,20 @@ class DriftCropImagePage extends HookWidget {
             color: ImmichColor.primary,
             variant: ImmichVariant.ghost,
             onPressed: () async {
-              final croppedImage = await cropController.croppedImage();
-              unawaited(context.pushRoute(DriftEditImageRoute(asset: asset, image: croppedImage, isEdited: true)));
+              _log.info("Crop confirmed — requesting cropped image for asset: ${asset.name}");
+              _log.fine("Crop rect: ${cropController.crop}, aspectRatio: ${cropController.aspectRatio}, rotation: ${cropController.rotation}");
+              try {
+                final croppedImage = await cropController.croppedImage();
+                _log.info("croppedImage() returned successfully");
+                if (context.mounted) {
+                  unawaited(context.pushRoute(DriftEditImageRoute(asset: asset, image: croppedImage, isEdited: true)));
+                }
+              } catch (e, stack) {
+                _log.severe("croppedImage() threw an error", e, stack);
+                if (context.mounted) {
+                  ImmichToast.show(context: context, msg: 'crop_failed'.tr(), toastType: ToastType.error);
+                }
+              }
             },
           ),
         ],

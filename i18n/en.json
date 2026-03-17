@@ -864,6 +864,7 @@
   "creating_linked_albums": "Creating linked albums...",
   "crop": "Crop",
   "crop_aspect_ratio_fixed": "Fixed",
+  "crop_failed": "Failed to crop image",
   "crop_aspect_ratio_free": "Free",
   "crop_aspect_ratio_original": "Original",
   "curated_object_page_title": "Things",
