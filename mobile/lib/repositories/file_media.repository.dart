@@ -16,14 +16,19 @@ class FileMediaRepository {
     return AssetMediaRepository.toAsset(entity);
   }
 
-  Future<LocalAsset?> saveLocalAsset(Uint8List data, {required String title, String? relativePath}) async {
+  Future<LocalAsset?> saveLocalAsset(
+    Uint8List data, {
+    required String title,
+    String? relativePath,
+    DateTime? createdAt,
+  }) async {
     final entity = await PhotoManager.editor.saveImage(data, filename: title, title: title, relativePath: relativePath);
 
     return LocalAsset(
       id: entity.id,
       name: title,
       type: AssetType.image,
-      createdAt: entity.createDateTime,
+      createdAt: createdAt ?? entity.createDateTime,
       updatedAt: entity.modifiedDateTime,
       playbackStyle: AssetPlaybackStyle.image,
       isEdited: false,

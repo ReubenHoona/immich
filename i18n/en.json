@@ -1310,6 +1310,7 @@
   "image_alt_text_date_place_2_people": "{isVideo, select, true {Video} other {Image}} taken in {city}, {country} with {person1} and {person2} on {date}",
   "image_alt_text_date_place_3_people": "{isVideo, select, true {Video} other {Image}} taken in {city}, {country} with {person1}, {person2}, and {person3} on {date}",
   "image_alt_text_date_place_4_or_more_people": "{isVideo, select, true {Video} other {Image}} taken in {city}, {country} with {person1}, {person2}, and {additionalCount, number} others on {date}",
+  "image_saved_as_new_copy": "Saved as new copy in gallery",
   "image_saved_successfully": "Image saved",
   "image_viewer_page_state_provider_download_started": "Download Started",
   "image_viewer_page_state_provider_download_success": "Download Success",
