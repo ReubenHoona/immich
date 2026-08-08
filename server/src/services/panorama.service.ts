@@ -187,14 +187,23 @@ export class PanoramaService extends BaseService {
     const flush = async () => {
       const frames = collapseTwins(cluster);
       cluster = [];
-      if (frames.length < minFrames || frames.length > PANORAMA_DETECT_MAX_FRAMES) {
+      if (frames.length < minFrames) {
         return;
       }
       if (!force && frames.every((frame) => frame.panoramaAt !== null)) {
         return;
       }
-      clusters++;
-      jobs.push({ name: JobName.PanoramaDetect, data: { ids: frames.map((frame) => frame.id) } });
+      // long sessions (slow deliberate sweeps) can exceed the per-detection frame cap;
+      // split into overlapping windows so chains crossing a boundary are still found
+      const step = PANORAMA_DETECT_MAX_FRAMES - 2;
+      for (let start = 0; start === 0 || start + 2 < frames.length; start += step) {
+        const window = frames.slice(start, start + PANORAMA_DETECT_MAX_FRAMES);
+        if (window.length < minFrames) {
+          break;
+        }
+        clusters++;
+        jobs.push({ name: JobName.PanoramaDetect, data: { ids: window.map((frame) => frame.id) } });
+      }
       if (jobs.length >= JOBS_ASSET_PAGINATION_SIZE) {
         await this.jobRepository.queueAll(jobs);
         jobs = [];

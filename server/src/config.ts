@@ -340,7 +340,7 @@ export const defaults = Object.freeze<SystemConfig>({
     panorama: {
       enabled: false,
       modelName: 'orb-classic',
-      maxGapSeconds: 12,
+      maxGapSeconds: 30,
       minFrames: 2,
       maxFrames: 10,
       minOverlap: 0.1,

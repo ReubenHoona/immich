@@ -76,7 +76,11 @@ export class PanoramaRepository {
     await this.db.deleteFrom('panorama_group').where('status', 'in', PENDING_STATUSES).execute();
   }
 
-  /** Wipe pending groups that touch any of the given assets (the cluster is being re-evaluated). */
+  /**
+   * Wipe pending groups whose members are all within the given assets (the cluster is
+   * being re-evaluated). Groups extending beyond the set — e.g. from an adjacent
+   * detection window — are left alone.
+   */
   async deletePendingByAssetIds(assetIds: string[]): Promise<void> {
     if (assetIds.length === 0) {
       return;
@@ -86,6 +90,17 @@ export class PanoramaRepository {
       .where('status', 'in', PENDING_STATUSES)
       .where('id', 'in', (eb) =>
         eb.selectFrom('panorama_group_asset').select('groupId').where('assetId', 'in', assetIds),
+      )
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('panorama_group_asset as outside')
+              .select('outside.groupId')
+              .whereRef('outside.groupId', '=', 'panorama_group.id')
+              .where('outside.assetId', 'not in', assetIds),
+          ),
+        ),
       )
       .execute();
   }
