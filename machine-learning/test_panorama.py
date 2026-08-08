@@ -5,6 +5,13 @@ import pytest
 from immich_ml.panorama import DetectOptions, PanoramaError, StitchOptions, detect, stitch
 
 
+@pytest.fixture(autouse=True)
+def _stable_cv_rng() -> None:
+    # findHomography's RANSAC uses cv2's global RNG; pin it so borderline
+    # geometry doesn't flake depending on test order
+    cv2.setRNGSeed(12345)
+
+
 def _textured_scene(width: int = 1600, height: int = 900, seed: int = 42) -> np.ndarray:
     """A synthetic scene with enough structure for ORB features."""
     rng = np.random.default_rng(seed)

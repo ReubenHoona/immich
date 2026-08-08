@@ -41,6 +41,7 @@ class StitchOptions(BaseModel):
     compositeResolution: Literal["full", "preview"] = "full"
     cropAuto: bool = True
     maxMegapixels: float = Field(default=400.0, gt=0.0, le=1000.0)
+    verifySources: bool = True
 
 
 MAX_FRAMES = 16
@@ -265,6 +266,41 @@ def _autocrop(pano: NDArray[np.uint8]) -> NDArray[np.uint8]:
     return pano[y0 : y1 + 1, x0 : x1 + 1]
 
 
+def _verify_sources(frames: list[NDArray[np.uint8]], pano: NDArray[np.uint8]) -> list[int]:
+    """Indices of feature-rich source frames that cannot be re-localized inside the result.
+
+    A structurally wrong merge can look plausible while having dropped, duplicated, or
+    misplaced content; requiring every source frame to match consistently into the pano
+    catches that. Low-texture frames (sky, plain walls) are skipped — too few features
+    to judge either way.
+    """
+    pano_gray = _downscale(cast(NDArray[np.uint8], cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY)), 2600)
+    orb_pano = cv2.ORB.create(nfeatures=8000)
+    orb_frame = cv2.ORB.create(nfeatures=1500)
+    pano_kp, pano_des = orb_pano.detectAndCompute(pano_gray, None)
+    if pano_des is None:
+        return []
+    matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    missing: list[int] = []
+    for index, frame in enumerate(frames):
+        gray = _downscale(cast(NDArray[np.uint8], cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)), 900)
+        kp, des = orb_frame.detectAndCompute(gray, None)
+        if des is None or len(kp) < 300:
+            continue  # not enough texture to judge
+        knn = matcher.knnMatch(des, pano_des, k=2)
+        good = [m for m, n in (pair for pair in knn if len(pair) == 2) if m.distance < 0.75 * n.distance]
+        inliers = 0
+        if len(good) >= 12:
+            src = np.array([kp[m.queryIdx].pt for m in good], dtype=np.float32).reshape(-1, 1, 2)
+            dst = np.array([pano_kp[m.trainIdx].pt for m in good], dtype=np.float32).reshape(-1, 1, 2)
+            homography, mask = cv2.findHomography(src, dst, cv2.RANSAC, 5.0)
+            if homography is not None:
+                inliers = int(mask.sum())
+        if inliers < 20:
+            missing.append(index)
+    return missing
+
+
 def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
     """Stitch ordered frames into a panorama. Returns (jpeg bytes, width, height)."""
     if not 2 <= len(images) <= MAX_FRAMES:
@@ -299,6 +335,12 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         stitcher.setPanoConfidenceThresh(0.4)
         status, pano = stitcher.stitch(frames)
     if status != cv2.Stitcher_OK:
+        # flat subjects photographed close up (documents, boards) violate the rotational
+        # model but stitch cleanly with the affine SCANS pipeline
+        stitcher = cv2.Stitcher.create(cv2.Stitcher_SCANS)
+        stitcher.setPanoConfidenceThresh(0.5)
+        status, pano = stitcher.stitch(frames)
+    if status != cv2.Stitcher_OK:
         reasons = {
             cv2.Stitcher_ERR_NEED_MORE_IMGS: "not enough overlapping content",
             cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL: "homography estimation failed",
@@ -318,6 +360,10 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
     if filled < 0.55:
         raise PanoramaError(422, f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
+    if options.verifySources:
+        missing = _verify_sources(frames, pano)
+        if missing:
+            raise PanoramaError(422, f"Stitch failed verification: source frame(s) {missing} not found in the result")
 
     params = [cv2.IMWRITE_JPEG_QUALITY, options.quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
     if options.quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):
