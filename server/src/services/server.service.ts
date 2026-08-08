@@ -23,6 +23,7 @@ import {
   isDuplicateDetectionEnabled,
   isFacialRecognitionEnabled,
   isOcrEnabled,
+  isPanoramaEnabled,
   isSmartSearchEnabled,
 } from 'src/utils/misc';
 
@@ -103,6 +104,7 @@ export class ServerService extends BaseService {
       oauth: oauth.enabled,
       oauthAutoLaunch: oauth.autoLaunch,
       ocr: isOcrEnabled(machineLearning),
+      panorama: isPanoramaEnabled(machineLearning),
       passwordLogin: passwordLogin.enabled,
       configFile: !!configFile,
       email: notifications.smtp.enabled,

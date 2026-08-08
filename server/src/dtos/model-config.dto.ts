@@ -54,4 +54,35 @@ export const OcrConfigSchema = ModelConfigSchema.extend({
     .describe('Minimum confidence score for text recognition'),
 }).meta({ id: 'OcrConfig' });
 
+export const PanoramaConfigSchema = ModelConfigSchema.extend({
+  maxGapSeconds: z.int().min(1).max(120).describe('Maximum seconds between consecutive shots in a sweep'),
+  minFrames: z.int().min(2).max(16).describe('Minimum frames for a panorama group'),
+  maxFrames: z.int().min(2).max(16).describe('Maximum frames stitched into one panorama'),
+  minOverlap: z
+    .number()
+    .meta({ format: 'double' })
+    .min(0)
+    .max(1)
+    .describe('Minimum pairwise frame overlap for a sweep link'),
+  maxOverlap: z
+    .number()
+    .meta({ format: 'double' })
+    .min(0)
+    .max(1)
+    .describe('Maximum pairwise frame overlap for a sweep link (higher is a duplicate)'),
+  minInliers: z.int().min(4).describe('Minimum RANSAC inlier matches for a valid link'),
+  minDisplacement: z
+    .number()
+    .meta({ format: 'double' })
+    .min(0)
+    .max(1)
+    .describe('Minimum camera sweep displacement between frames, as a fraction of frame size'),
+  autoStitch: z.boolean().describe('Automatically stitch detected panoramas without review'),
+  stackSources: z.boolean().describe('Stack the source frames under the generated panorama'),
+  quality: z.int().min(50).max(100).describe('JPEG quality of the stitched panorama'),
+  compositeResolution: z
+    .enum(['full', 'preview'])
+    .describe('Stitch at full original resolution or fast preview resolution'),
+}).meta({ id: 'PanoramaConfig' });
+
 export class CLIPConfig extends createZodDto(CLIPConfigSchema) {}

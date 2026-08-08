@@ -201,6 +201,9 @@ export enum Permission {
   NotificationUpdate = 'notification.update',
   NotificationDelete = 'notification.delete',
 
+  PanoramaRead = 'panorama.read',
+  PanoramaUpdate = 'panorama.update',
+
   PartnerCreate = 'partner.create',
   PartnerRead = 'partner.read',
   PartnerUpdate = 'partner.update',
@@ -392,6 +395,19 @@ export enum AssetStatus {
   Trashed = 'trashed',
   Deleted = 'deleted',
 }
+
+export enum PanoramaGroupStatus {
+  Candidate = 'candidate',
+  Dismissed = 'dismissed',
+  Processing = 'processing',
+  Completed = 'completed',
+  Failed = 'failed',
+}
+
+export const PanoramaGroupStatusSchema = z
+  .enum(PanoramaGroupStatus)
+  .describe('Panorama group status')
+  .meta({ id: 'PanoramaGroupStatus' });
 
 export enum SourceType {
   MachineLearning = 'machine-learning',
@@ -809,6 +825,7 @@ export enum QueueName {
   Workflow = 'workflow',
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
+  Panorama = 'panorama',
 }
 
 export const QueueNameSchema = z.enum(QueueName).describe('Queue name').meta({ id: 'QueueName' });
@@ -900,6 +917,11 @@ export enum JobName {
   // OCR
   OcrQueueAll = 'OcrQueueAll',
   Ocr = 'Ocr',
+
+  // Panorama
+  PanoramaQueueAll = 'PanoramaQueueAll',
+  PanoramaDetect = 'PanoramaDetect',
+  PanoramaStitch = 'PanoramaStitch',
 
   // Workflow
   WorkflowAssetTrigger = 'WorkflowAssetTrigger',
@@ -1189,6 +1211,7 @@ export enum ApiTag {
   Memories = 'Memories',
   Notifications = 'Notifications',
   NotificationsAdmin = 'Notifications (admin)',
+  Panoramas = 'Panoramas',
   Partners = 'Partners',
   People = 'People',
   Plugins = 'Plugins',

@@ -104,6 +104,21 @@ export type SystemConfig = {
       minRecognitionScore: number;
       maxResolution: number;
     };
+    panorama: {
+      enabled: boolean;
+      modelName: string;
+      maxGapSeconds: number;
+      minFrames: number;
+      maxFrames: number;
+      minOverlap: number;
+      maxOverlap: number;
+      minInliers: number;
+      minDisplacement: number;
+      autoStitch: boolean;
+      stackSources: boolean;
+      quality: number;
+      compositeResolution: 'full' | 'preview';
+    };
   };
   map: {
     enabled: boolean;
@@ -286,6 +301,7 @@ export const defaults = Object.freeze<SystemConfig>({
     [QueueName.Workflow]: { concurrency: 5 },
     [QueueName.IntegrityCheck]: { concurrency: 1 },
     [QueueName.Editor]: { concurrency: 2 },
+    [QueueName.Panorama]: { concurrency: 1 },
   },
   logging: {
     enabled: true,
@@ -320,6 +336,21 @@ export const defaults = Object.freeze<SystemConfig>({
       minDetectionScore: 0.5,
       minRecognitionScore: 0.8,
       maxResolution: 736,
+    },
+    panorama: {
+      enabled: false,
+      modelName: 'orb-classic',
+      maxGapSeconds: 12,
+      minFrames: 2,
+      maxFrames: 10,
+      minOverlap: 0.1,
+      maxOverlap: 0.85,
+      minInliers: 22,
+      minDisplacement: 0.12,
+      autoStitch: false,
+      stackSources: true,
+      quality: 97,
+      compositeResolution: 'full',
     },
   },
   map: {

@@ -45,6 +45,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     [QueueName.Workflow]: { concurrency: 5 },
     [QueueName.IntegrityCheck]: { concurrency: 1 },
     [QueueName.Editor]: { concurrency: 2 },
+    [QueueName.Panorama]: { concurrency: 1 },
   },
   backup: {
     database: {
@@ -135,6 +136,21 @@ const updatedConfig = Object.freeze<SystemConfig>({
       minDetectionScore: 0.5,
       minRecognitionScore: 0.8,
       maxResolution: 736,
+    },
+    panorama: {
+      enabled: false,
+      modelName: 'orb-classic',
+      maxGapSeconds: 12,
+      minFrames: 2,
+      maxFrames: 10,
+      minOverlap: 0.1,
+      maxOverlap: 0.85,
+      minInliers: 22,
+      minDisplacement: 0.12,
+      autoStitch: false,
+      stackSources: true,
+      quality: 97,
+      compositeResolution: 'full',
     },
   },
   map: {

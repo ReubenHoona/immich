@@ -59,6 +59,8 @@ import { MoveTable } from 'src/schema/tables/move.table';
 import { NaturalEarthCountriesTable } from 'src/schema/tables/natural-earth-countries.table';
 import { NotificationTable } from 'src/schema/tables/notification.table';
 import { OcrSearchTable } from 'src/schema/tables/ocr-search.table';
+import { PanoramaGroupAssetTable } from 'src/schema/tables/panorama-group-asset.table';
+import { PanoramaGroupTable } from 'src/schema/tables/panorama-group.table';
 import { PartnerAuditTable } from 'src/schema/tables/partner-audit.table';
 import { PartnerTable } from 'src/schema/tables/partner.table';
 import { PersonAuditTable } from 'src/schema/tables/person-audit.table';
@@ -126,6 +128,8 @@ export class ImmichDatabase {
     NaturalEarthCountriesTable,
     NotificationTable,
     OcrSearchTable,
+    PanoramaGroupTable,
+    PanoramaGroupAssetTable,
     PartnerAuditTable,
     PartnerTable,
     PersonTable,
@@ -237,6 +241,9 @@ export interface DB {
   move_history: MoveTable;
 
   naturalearth_countries: NaturalEarthCountriesTable;
+
+  panorama_group: PanoramaGroupTable;
+  panorama_group_asset: PanoramaGroupAssetTable;
 
   partner: PartnerTable;
   partner_audit: PartnerAuditTable;

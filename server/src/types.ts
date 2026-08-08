@@ -456,6 +456,11 @@ export type JobItem =
   | { name: JobName.OcrQueueAll; data: IBaseJob }
   | { name: JobName.Ocr; data: IEntityJob }
 
+  // Panorama
+  | { name: JobName.PanoramaQueueAll; data: IBaseJob }
+  | { name: JobName.PanoramaDetect; data: IBulkEntityJob }
+  | { name: JobName.PanoramaStitch; data: IEntityJob }
+
   // Workflow
   | { name: JobName.WorkflowAssetTrigger; data: { workflowId: string; assetId: string } }
 
