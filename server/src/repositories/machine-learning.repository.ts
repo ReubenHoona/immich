@@ -77,6 +77,45 @@ export type DetectedFaces = { faces: Face[] } & VisualResponse;
 export type MachineLearningRequest = ClipVisualRequest | ClipTextualRequest | FacialRecognitionRequest | OcrRequest;
 export type TextEncodingOptions = ModelOptions & { language?: string };
 
+export type PanoramaDetectOptions = {
+  minOverlap: number;
+  maxOverlap: number;
+  minInliers: number;
+  minDisplacement: number;
+};
+
+export type PanoramaLink = {
+  matches: number;
+  inliers: number;
+  ratio: number;
+  overlap: number | null;
+  displacement: number | null;
+  dx: number;
+  dy: number;
+  ok: boolean;
+};
+
+export type PanoramaDetectResponse = {
+  frames: number;
+  links: PanoramaLink[];
+  classification: 'panorama' | 'burst' | 'unrelated';
+  chainStart: number | null;
+  chainEnd: number | null;
+  score: number;
+  mixedDirections: boolean;
+};
+
+export type PanoramaStitchOptions = {
+  quality: number;
+  compositeResolution: 'full' | 'preview';
+};
+
+export type PanoramaStitchResult = {
+  data: Buffer;
+  width: number;
+  height: number;
+};
+
 @Injectable()
 export class MachineLearningRepository {
   private healthyMap: Record<string, boolean> = {};
@@ -216,6 +255,77 @@ export class MachineLearningRepository {
     const request = { [ModelTask.SEARCH]: { [ModelType.TEXTUAL]: { modelName, options: { language } } } };
     const response = await this.predict<ClipTextualResponse>({ text }, request);
     return response[ModelTask.SEARCH];
+  }
+
+  private orderedUrls() {
+    return [
+      // try healthy servers first
+      ...this.config.urls.filter((url) => this.isHealthy(url)),
+      ...this.config.urls.filter((url) => !this.isHealthy(url)),
+    ];
+  }
+
+  private async getImagesFormData(imagePaths: string[], options: object): Promise<FormData> {
+    const formData = new FormData();
+    formData.append('options', JSON.stringify(options));
+    for (const imagePath of imagePaths) {
+      const fileBuffer = await readFile(imagePath);
+      formData.append('images', new Blob([new Uint8Array(fileBuffer)]));
+    }
+    return formData;
+  }
+
+  async panoramaDetect(imagePaths: string[], options: PanoramaDetectOptions): Promise<PanoramaDetectResponse> {
+    const formData = await this.getImagesFormData(imagePaths, options);
+
+    for (const url of this.orderedUrls()) {
+      try {
+        const response = await fetch(new URL('panorama/detect', url), { method: 'POST', body: formData });
+        if (response.ok) {
+          this.setHealthy(url, true);
+          return response.json();
+        }
+        this.logger.warn(`Panorama detect request to "${url}" failed with status ${response.status}`);
+      } catch (error: Error | unknown) {
+        this.logger.warn(`Panorama detect request to "${url}" failed: ${error instanceof Error ? error.message : error}`);
+        this.setHealthy(url, false);
+      }
+    }
+
+    throw new Error(`Panorama detect request failed for all URLs`);
+  }
+
+  async panoramaStitch(imagePaths: string[], options: PanoramaStitchOptions): Promise<PanoramaStitchResult> {
+    const formData = await this.getImagesFormData(imagePaths, options);
+
+    // A stitch is minutes of CPU on the ML side: try each URL at most once and
+    // never retry after a timeout, so a slow stitch cannot be doubled up.
+    for (const url of this.orderedUrls()) {
+      try {
+        const response = await fetch(new URL('panorama/stitch', url), {
+          method: 'POST',
+          body: formData,
+          signal: AbortSignal.timeout(240_000),
+        });
+        if (response.ok) {
+          this.setHealthy(url, true);
+          return {
+            data: Buffer.from(await response.arrayBuffer()),
+            width: Number(response.headers.get('X-Immich-Pano-Width')),
+            height: Number(response.headers.get('X-Immich-Pano-Height')),
+          };
+        }
+        const detail = await response.text().catch(() => '');
+        throw new Error(`Panorama stitch failed with status ${response.status}: ${detail.slice(0, 200)}`);
+      } catch (error: Error | unknown) {
+        if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
+          throw new Error(`Panorama stitch timed out against "${url}"`);
+        }
+        throw error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    throw new Error(`No machine learning servers configured for panorama stitch`);
   }
 
   async ocr(imagePath: string, { modelName, minDetectionScore, minRecognitionScore, maxResolution }: OcrOptions) {

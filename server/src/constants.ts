@@ -169,6 +169,8 @@ export const endpointTags: Record<ApiTag, string> = {
   [ApiTag.Notifications]:
     'A notification is a specialized message sent to users to inform them of important events. Currently, these notifications are only shown in the Immich web application.',
   [ApiTag.NotificationsAdmin]: 'Notification administrative endpoints.',
+  [ApiTag.Panoramas]:
+    'A panorama group is a set of consecutive shots detected as a camera sweep that can be stitched into a panorama.',
   [ApiTag.Partners]: 'A partner is a link with another user that allows sharing of assets between two users.',
   [ApiTag.People]:
     'A person is a collection of faces, which can be favorited and named. A person can also be merged into another person. People are automatically created via the face recognition job.',

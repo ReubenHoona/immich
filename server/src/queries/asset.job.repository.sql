@@ -857,3 +857,94 @@ from
   "asset"
 where
   "asset"."deletedAt" is null
+
+-- AssetJobRepository.streamForPanoramaJob
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."originalFileName",
+  "asset_exif"."make",
+  "asset_exif"."model",
+  "asset_exif"."dateTimeOriginal",
+  "job_status"."panoramaAt"
+from
+  "asset"
+  inner join "asset_job_status" as "job_status" on "assetId" = "asset"."id"
+  inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+where
+  "asset"."visibility" != $1
+  and "asset"."deletedAt" is null
+  and exists (
+    select
+    from
+      "asset_file"
+    where
+      "assetId" = "asset"."id"
+      and "asset_file"."type" = $2
+  )
+  and "asset"."type" = $3
+  and "asset_exif"."make" is not null
+  and "asset_exif"."model" is not null
+  and "asset_exif"."dateTimeOriginal" is not null
+  and not exists (
+    select
+      "panorama_group"."id"
+    from
+      "panorama_group"
+    where
+      "panorama_group"."resultAssetId" = "asset"."id"
+  )
+order by
+  "asset"."ownerId",
+  "asset_exif"."make",
+  "asset_exif"."model",
+  "asset_exif"."dateTimeOriginal"
+
+-- AssetJobRepository.getForPanoramaDetect
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."visibility",
+  (
+    select
+      "asset_file"."path"
+    from
+      "asset_file"
+    where
+      "asset_file"."assetId" = "asset"."id"
+      and "asset_file"."type" = 'preview'
+      and "asset_file"."isEdited" = false
+  ) as "previewFile"
+from
+  "asset"
+where
+  "asset"."id" in ($1)
+
+-- AssetJobRepository.getForPanoramaStitch
+select
+  "asset"."id",
+  "asset"."ownerId",
+  "asset"."libraryId",
+  "asset"."originalPath",
+  "asset"."originalFileName",
+  "asset"."fileCreatedAt",
+  "asset"."fileModifiedAt",
+  "asset"."localDateTime",
+  "asset_exif"."dateTimeOriginal",
+  "asset_exif"."timeZone",
+  (
+    select
+      "asset_file"."path"
+    from
+      "asset_file"
+    where
+      "asset_file"."assetId" = "asset"."id"
+      and "asset_file"."type" = 'preview'
+      and "asset_file"."isEdited" = false
+  ) as "previewFile"
+from
+  "asset"
+  inner join "asset_exif" on "asset_exif"."assetId" = "asset"."id"
+where
+  "asset"."id" in ($1)
+  and "asset"."deletedAt" is null

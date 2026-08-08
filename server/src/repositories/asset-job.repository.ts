@@ -464,4 +464,75 @@ export class AssetJobRepository {
   streamForMigrationJob() {
     return this.db.selectFrom('asset').select(['id']).where('asset.deletedAt', 'is', null).stream();
   }
+
+  @GenerateSql({ params: [], stream: true })
+  streamForPanoramaJob() {
+    return this.assetsWithPreviews()
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select([
+        'asset.id',
+        'asset.ownerId',
+        'asset.originalFileName',
+        'asset_exif.make',
+        'asset_exif.model',
+        'asset_exif.dateTimeOriginal',
+        'job_status.panoramaAt',
+      ])
+      .where('asset.type', '=', AssetType.Image)
+      .where('asset_exif.make', 'is not', null)
+      .where('asset_exif.model', 'is not', null)
+      .where('asset_exif.dateTimeOriginal', 'is not', null)
+      .where((eb) =>
+        eb.not(
+          eb.exists(
+            eb
+              .selectFrom('panorama_group')
+              .select('panorama_group.id')
+              .whereRef('panorama_group.resultAssetId', '=', 'asset.id'),
+          ),
+        ),
+      )
+      .orderBy('asset.ownerId')
+      .orderBy('asset_exif.make')
+      .orderBy('asset_exif.model')
+      .orderBy('asset_exif.dateTimeOriginal')
+      .stream();
+  }
+
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  getForPanoramaDetect(ids: string[]) {
+    return this.db
+      .selectFrom('asset')
+      .select((eb) => [
+        'asset.id',
+        'asset.ownerId',
+        'asset.visibility',
+        withFilePath(eb, AssetFileType.Preview).as('previewFile'),
+      ])
+      .where('asset.id', 'in', ids)
+      .execute();
+  }
+
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  getForPanoramaStitch(ids: string[]) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select((eb) => [
+        'asset.id',
+        'asset.ownerId',
+        'asset.libraryId',
+        'asset.originalPath',
+        'asset.originalFileName',
+        'asset.fileCreatedAt',
+        'asset.fileModifiedAt',
+        'asset.localDateTime',
+        'asset_exif.dateTimeOriginal',
+        'asset_exif.timeZone',
+        withFilePath(eb, AssetFileType.Preview).as('previewFile'),
+      ])
+      .where('asset.id', 'in', ids)
+      .where('asset.deletedAt', 'is', null)
+      .execute();
+  }
 }

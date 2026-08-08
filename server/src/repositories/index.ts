@@ -28,6 +28,7 @@ import { MoveRepository } from 'src/repositories/move.repository';
 import { NotificationRepository } from 'src/repositories/notification.repository';
 import { OAuthRepository } from 'src/repositories/oauth.repository';
 import { OcrRepository } from 'src/repositories/ocr.repository';
+import { PanoramaRepository } from 'src/repositories/panorama.repository';
 import { PartnerRepository } from 'src/repositories/partner.repository';
 import { PersonRepository } from 'src/repositories/person.repository';
 import { PluginRepository } from 'src/repositories/plugin.repository';
@@ -83,6 +84,7 @@ export const repositories = [
   NotificationRepository,
   OAuthRepository,
   OcrRepository,
+  PanoramaRepository,
   PartnerRepository,
   PersonRepository,
   PluginRepository,
