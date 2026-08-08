@@ -11,13 +11,14 @@ from typing import Any, AsyncGenerator, Callable, Iterator
 from zipfile import BadZipFile
 
 import orjson
-from fastapi import Depends, FastAPI, File, Form, HTTPException
-from fastapi.responses import PlainTextResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import PlainTextResponse, Response
 from onnxruntime.capi.onnxruntime_pybind11_state import InvalidProtobuf, NoSuchFile
 from PIL.Image import Image
 from pydantic import ValidationError
 from starlette.formparsers import MultiPartParser
 
+from immich_ml import panorama
 from immich_ml.models import get_model_deps
 from immich_ml.models.base import InferenceModel
 from immich_ml.models.transforms import decode_pil
@@ -180,6 +181,49 @@ async def predict(
         raise HTTPException(400, "Either image or text must be provided")
     response = await run_inference(inputs, entries)
     return ORJSONResponse(response)
+
+
+def get_panorama_detect_options(options: str | None = Form(default=None)) -> panorama.DetectOptions:
+    try:
+        return panorama.DetectOptions.model_validate_json(options) if options else panorama.DetectOptions()
+    except ValidationError as e:
+        log.error(f"Invalid panorama detect options: {e}")
+        raise HTTPException(422, "Invalid panorama options.")
+
+
+def get_panorama_stitch_options(options: str | None = Form(default=None)) -> panorama.StitchOptions:
+    try:
+        return panorama.StitchOptions.model_validate_json(options) if options else panorama.StitchOptions()
+    except ValidationError as e:
+        log.error(f"Invalid panorama stitch options: {e}")
+        raise HTTPException(422, "Invalid panorama options.")
+
+
+@app.post("/panorama/detect", dependencies=[Depends(update_state)])
+async def panorama_detect(
+    images: list[UploadFile] = File(),
+    options: panorama.DetectOptions = Depends(get_panorama_detect_options),
+) -> ORJSONResponse:
+    payloads = [await image.read() for image in images]
+    try:
+        result = await run(panorama.detect, payloads, options)
+    except panorama.PanoramaError as e:
+        raise HTTPException(e.status_code, e.message)
+    return ORJSONResponse(result)
+
+
+@app.post("/panorama/stitch", dependencies=[Depends(update_state)])
+async def panorama_stitch(
+    images: list[UploadFile] = File(),
+    options: panorama.StitchOptions = Depends(get_panorama_stitch_options),
+) -> Response:
+    payloads = [await image.read() for image in images]
+    try:
+        jpeg, width, height = await run(panorama.stitch, payloads, options)
+    except panorama.PanoramaError as e:
+        raise HTTPException(e.status_code, e.message)
+    headers = {"X-Immich-Pano-Width": str(width), "X-Immich-Pano-Height": str(height)}
+    return Response(content=jpeg, media_type="image/jpeg", headers=headers)
 
 
 async def run_inference(payload: Image | str, entries: InferenceEntries) -> InferenceResponse:
