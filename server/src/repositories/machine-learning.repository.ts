@@ -93,6 +93,7 @@ export type PanoramaLink = {
   displacement: number | null;
   dx: number;
   dy: number;
+  scale: number;
   ok: boolean;
 };
 
@@ -104,6 +105,7 @@ export type PanoramaDetectResponse = {
   chainEnd: number | null;
   score: number;
   mixedDirections: boolean;
+  scaleDrift: number;
 };
 
 export type PanoramaStitchOptions = {

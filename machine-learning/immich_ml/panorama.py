@@ -31,6 +31,7 @@ class DetectOptions(BaseModel):
     minOverlap: float = Field(default=0.10, ge=0.0, le=1.0)
     maxOverlap: float = Field(default=0.85, ge=0.0, le=1.0)
     minDisplacement: float = Field(default=0.12, ge=0.0, le=1.0)
+    maxScaleDrift: float = Field(default=0.08, ge=0.0, le=1.0)
     maxDim: int = Field(default=1000, ge=256, le=2048)
     orbFeatures: int = Field(default=2500, ge=500, le=8000)
 
@@ -54,6 +55,7 @@ class LinkStats(TypedDict):
     displacement: float | None
     dx: float
     dy: float
+    scale: float
     ok: bool
 
 
@@ -65,6 +67,7 @@ class DetectResult(TypedDict):
     chainEnd: int | None
     score: float
     mixedDirections: bool
+    scaleDrift: float
 
 
 def _decode(image: bytes, grayscale: bool = False) -> NDArray[np.uint8]:
@@ -85,7 +88,9 @@ def _downscale(img: NDArray[np.uint8], max_dim: int) -> NDArray[np.uint8]:
 
 
 def _empty_link() -> LinkStats:
-    return LinkStats(matches=0, inliers=0, ratio=0.0, overlap=None, displacement=None, dx=0.0, dy=0.0, ok=False)
+    return LinkStats(
+        matches=0, inliers=0, ratio=0.0, overlap=None, displacement=None, dx=0.0, dy=0.0, scale=1.0, ok=False
+    )
 
 
 def _eval_pair(
@@ -119,6 +124,7 @@ def _eval_pair(
     det = homography[0, 0] * homography[1, 1] - homography[0, 1] * homography[1, 0]
     if not (0.15 < abs(det) < 6.0) or abs(homography[2, 0]) > 0.003 or abs(homography[2, 1]) > 0.003:
         return link
+    link["scale"] = round(float(abs(det)) ** 0.5, 3)
     height_a, width_a = shape_a
     height_b, width_b = shape_b
     corners_b = np.float32([[0, 0], [width_b, 0], [width_b, height_b], [0, height_b]]).reshape(-1, 1, 2)
@@ -189,10 +195,16 @@ def detect(images: list[bytes], options: DetectOptions) -> DetectResult:
     chain_end: int | None = None
     score = 0.0
     mixed = False
+    scale_drift = 0.0
     if best_start >= 0:
         chain_links = links[best_start : best_end + 1]
         frame_count = best_end - best_start + 2
-        if frame_count > 2 or _is_pano_link(chain_links[0], options, strict=True):
+        scale_drift = round(float(np.median([abs(link["scale"] - 1) for link in chain_links])), 3)
+        if scale_drift > options.maxScaleDrift:
+            # Consistent zoom between frames means the camera moved forward (walking,
+            # driving) rather than sweeping — stitching these produces garbage.
+            log.debug(f"Rejecting chain of {frame_count} frames: scale drift {scale_drift}")
+        elif frame_count > 2 or _is_pano_link(chain_links[0], options, strict=True):
             classification = "panorama"
             chain_start, chain_end = best_start, best_end + 1
             ideal = [1 - abs((link["overlap"] or 0) - 0.4) / 0.45 for link in chain_links]
@@ -215,6 +227,7 @@ def detect(images: list[bytes], options: DetectOptions) -> DetectResult:
         chainEnd=chain_end,
         score=round(score, 2),
         mixedDirections=mixed,
+        scaleDrift=scale_drift,
     )
 
 
@@ -290,6 +303,12 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         raise PanoramaError(422, f"Stitch failed: {reasons.get(status, f'status {status}')}")
     if options.cropAuto:
         pano = _autocrop(pano)
+
+    # A structurally broken registration (e.g. a forward-motion sequence) can still return
+    # Stitcher_OK but collapse the scene into a smear far smaller than any input frame.
+    median_frame_area = float(np.median([frame.shape[0] * frame.shape[1] for frame in frames]))
+    if pano.shape[0] * pano.shape[1] < 0.5 * median_frame_area:
+        raise PanoramaError(422, "Stitch failed: degenerate result (registration collapsed the scene)")
 
     params = [cv2.IMWRITE_JPEG_QUALITY, options.quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
     if options.quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):

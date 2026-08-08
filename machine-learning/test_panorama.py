@@ -66,6 +66,20 @@ class TestPanoramaDetect:
         result = detect(_strips(_textured_scene(), count=2, strip_frac=0.6), DetectOptions())
         assert result["classification"] == "panorama"
 
+    def test_forward_motion_zoom_is_rejected(self) -> None:
+        # simulate walking forward while drifting sideways: partial overlap and real
+        # displacement (like a sweep) but with a ~25% zoom between frames
+        scene = _textured_scene()
+        h, w = scene.shape[:2]
+        cw, ch = int(w * 0.6), int(h * 0.6)
+        zoom = 1.25
+        bw, bh = int(cw / zoom), int(ch / zoom)
+        frame_a = scene[0:ch, 0:cw]
+        frame_b = cv2.resize(scene[int(h * 0.06) : int(h * 0.06) + bh, int(w * 0.35) : int(w * 0.35) + bw], (cw, ch))
+        result = detect([_encode(frame_a), _encode(frame_b)], DetectOptions())
+        assert result["classification"] != "panorama"
+        assert result["scaleDrift"] > 0.08
+
     def test_frame_count_limits(self) -> None:
         frame = _encode(_textured_scene())
         with pytest.raises(PanoramaError) as err:
