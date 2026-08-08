@@ -5,7 +5,7 @@ Exposed through dedicated endpoints in main.py (the /predict pipeline is single-
 All functions here are synchronous and CPU-bound; callers run them in the thread pool.
 """
 
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, cast
 
 import cv2
 import numpy as np
@@ -75,7 +75,7 @@ def _decode(image: bytes, grayscale: bool = False) -> NDArray[np.uint8]:
     mat = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), flags)
     if mat is None:
         raise PanoramaError(400, "Failed to decode an input image")
-    return mat  # type: ignore[no-any-return]
+    return cast(NDArray[np.uint8], mat)
 
 
 def _downscale(img: NDArray[np.uint8], max_dim: int) -> NDArray[np.uint8]:
@@ -83,8 +83,7 @@ def _downscale(img: NDArray[np.uint8], max_dim: int) -> NDArray[np.uint8]:
     scale = max_dim / max(h, w)
     if scale >= 1.0:
         return img
-    resized: NDArray[np.uint8] = cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-    return resized
+    return cast(NDArray[np.uint8], cv2.resize(img, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA))
 
 
 def _empty_link() -> LinkStats:
@@ -95,10 +94,10 @@ def _empty_link() -> LinkStats:
 
 def _eval_pair(
     kp_a: Any,
-    des_a: NDArray[np.uint8] | None,
+    des_a: Any,
     shape_a: tuple[int, int],
     kp_b: Any,
-    des_b: NDArray[np.uint8] | None,
+    des_b: Any,
     shape_b: tuple[int, int],
     options: DetectOptions,
 ) -> LinkStats:
@@ -111,8 +110,8 @@ def _eval_pair(
     link["matches"] = len(good)
     if len(good) < options.minMatches:
         return link
-    src = np.float32([kp_a[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
-    dst = np.float32([kp_b[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
+    src = np.array([kp_a[m.queryIdx].pt for m in good], dtype=np.float32).reshape(-1, 1, 2)
+    dst = np.array([kp_b[m.trainIdx].pt for m in good], dtype=np.float32).reshape(-1, 1, 2)
     homography, mask = cv2.findHomography(dst, src, cv2.RANSAC, 4.0)  # maps b -> a
     if homography is None:
         return link
@@ -127,11 +126,11 @@ def _eval_pair(
     link["scale"] = round(float(abs(det)) ** 0.5, 3)
     height_a, width_a = shape_a
     height_b, width_b = shape_b
-    corners_b = np.float32([[0, 0], [width_b, 0], [width_b, height_b], [0, height_b]]).reshape(-1, 1, 2)
+    corners_b = np.array([[0, 0], [width_b, 0], [width_b, height_b], [0, height_b]], dtype=np.float32).reshape(-1, 1, 2)
     warped = cv2.perspectiveTransform(corners_b, homography).reshape(-1, 2).astype(np.float32)
     if not cv2.isContourConvex(warped):
         return link
-    rect_a = np.float32([[0, 0], [width_a, 0], [width_a, height_a], [0, height_a]])
+    rect_a = np.array([[0, 0], [width_a, 0], [width_a, height_a], [0, height_a]], dtype=np.float32)
     intersection, _ = cv2.intersectConvexConvex(rect_a, warped)
     area_a = float(width_a * height_a)
     area_b = float(abs(cv2.contourArea(warped)))
@@ -170,7 +169,7 @@ def _is_duplicate_link(link: LinkStats) -> bool:
 def detect(images: list[bytes], options: DetectOptions) -> DetectResult:
     if not 2 <= len(images) <= MAX_FRAMES:
         raise PanoramaError(400, f"Panorama detection needs 2..{MAX_FRAMES} images, got {len(images)}")
-    orb = cv2.ORB_create(nfeatures=options.orbFeatures, scaleFactor=1.2, nlevels=8)
+    orb = cv2.ORB.create(nfeatures=options.orbFeatures, scaleFactor=1.2, nlevels=8)
     grays = [_downscale(_decode(image, grayscale=True), options.maxDim) for image in images]
     features = [orb.detectAndCompute(gray, None) for gray in grays]
 
@@ -279,16 +278,21 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         # e.g. ten 50MP frames come down to ~40MP each rather than erroring out.
         scale = (options.maxMegapixels / total_megapixels) ** 0.5
         frames = [
-            cv2.resize(
-                frame,
-                (max(1, int(frame.shape[1] * scale)), max(1, int(frame.shape[0] * scale))),
-                interpolation=cv2.INTER_AREA,
+            cast(
+                NDArray[np.uint8],
+                cv2.resize(
+                    frame,
+                    (max(1, int(frame.shape[1] * scale)), max(1, int(frame.shape[0] * scale))),
+                    interpolation=cv2.INTER_AREA,
+                ),
             )
             for frame in frames
         ]
-        log.info(f"Panorama input {total_megapixels:.0f}MP over {options.maxMegapixels:.0f}MP budget, scaled by {scale:.2f}")
+        log.info(
+            f"Panorama input of {total_megapixels:.0f}MP exceeds {options.maxMegapixels:.0f}MP, scaling by {scale:.2f}"
+        )
 
-    stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
+    stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
     stitcher.setPanoConfidenceThresh(0.6)
     status, pano = stitcher.stitch(frames)
     if status != cv2.Stitcher_OK:
@@ -301,6 +305,7 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
             cv2.Stitcher_ERR_CAMERA_PARAMS_ADJUST_FAIL: "camera parameter adjustment failed",
         }
         raise PanoramaError(422, f"Stitch failed: {reasons.get(status, f'status {status}')}")
+    pano = cast(NDArray[np.uint8], pano)
     if options.cropAuto:
         pano = _autocrop(pano)
 

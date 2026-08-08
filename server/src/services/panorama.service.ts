@@ -384,7 +384,7 @@ export class PanoramaService extends BaseService {
           }
           asset = await this.assetRepository.getByChecksum(checksumQuery);
           if (!asset) {
-            throw new Error('Panorama asset vanished after checksum conflict');
+            throw new Error('Panorama asset vanished after checksum conflict', { cause: error });
           }
         }
       }

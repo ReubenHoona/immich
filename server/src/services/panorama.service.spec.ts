@@ -11,6 +11,13 @@ import { makeStream, newTestService, ServiceMocks } from 'test/utils';
 
 const panoramaEnabled = { machineLearning: { panorama: { enabled: true } } };
 
+const preview = (id: string) => ({
+  id,
+  ownerId: 'user-1',
+  visibility: 'timeline',
+  previewFile: `/thumbs/${id}.webp`,
+});
+
 const row = (overrides: Partial<PanoramaStreamRow>): PanoramaStreamRow => ({
   id: 'asset-1',
   ownerId: 'user-1',
@@ -132,12 +139,6 @@ describe(PanoramaService.name, () => {
   });
 
   describe('handleDetect', () => {
-    const preview = (id: string) => ({
-      id,
-      ownerId: 'user-1',
-      visibility: 'timeline',
-      previewFile: `/thumbs/${id}.webp`,
-    });
 
     it('creates a candidate group for a detected chain', async () => {
       mocks.systemMetadata.get.mockResolvedValue(panoramaEnabled);
@@ -150,6 +151,7 @@ describe(PanoramaService.name, () => {
         chainEnd: 1,
         score: 6.2,
         mixedDirections: false,
+        scaleDrift: 0,
       });
       mocks.panorama.getSettledMemberSets.mockResolvedValue([]);
       mocks.panorama.create.mockResolvedValue({ id: 'group-1' } as never);
@@ -179,6 +181,7 @@ describe(PanoramaService.name, () => {
         chainEnd: null,
         score: 0,
         mixedDirections: false,
+        scaleDrift: 0,
       });
 
       await expect(sut.handleDetect({ ids: ['a', 'b'] })).resolves.toBe(JobStatus.Success);
@@ -197,6 +200,7 @@ describe(PanoramaService.name, () => {
         chainEnd: 1,
         score: 5,
         mixedDirections: false,
+        scaleDrift: 0,
       });
       mocks.panorama.getSettledMemberSets.mockResolvedValue([['a', 'b']]);
 
@@ -217,6 +221,7 @@ describe(PanoramaService.name, () => {
         chainEnd: 1,
         score: 5,
         mixedDirections: false,
+        scaleDrift: 0,
       });
       mocks.panorama.getSettledMemberSets.mockResolvedValue([]);
       mocks.panorama.create.mockResolvedValue({ id: 'group-1' } as never);

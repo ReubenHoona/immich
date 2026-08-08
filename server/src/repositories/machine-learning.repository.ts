@@ -322,13 +322,13 @@ export class MachineLearningRepository {
         throw new Error(`Panorama stitch failed with status ${response.status}: ${detail.slice(0, 200)}`);
       } catch (error: Error | unknown) {
         if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
-          throw new Error(`Panorama stitch timed out against "${url}"`);
+          throw new Error(`Panorama stitch timed out against "${url}"`, { cause: error });
         }
         if (error instanceof Error) {
           const cause = error.cause instanceof Error ? ` (${error.cause.message})` : '';
-          throw new Error(`${error.message}${cause}`);
+          throw new Error(`${error.message}${cause}`, { cause: error });
         }
-        throw new Error(String(error));
+        throw new Error(String(error), { cause: error });
       }
     }
 
