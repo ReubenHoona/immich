@@ -102,10 +102,11 @@ class TestPanoramaStitch:
             stitch([a, b], StitchOptions())
         assert err.value.status_code == 422
 
-    def test_megapixel_cap(self) -> None:
-        with pytest.raises(PanoramaError) as err:
-            stitch(_strips(_textured_scene()), StitchOptions(maxMegapixels=0.5))
-        assert err.value.status_code == 413
+    def test_megapixel_budget_downscales_instead_of_failing(self) -> None:
+        strips = _strips(_textured_scene())
+        _, full_width, _ = stitch(strips, StitchOptions())
+        _, small_width, _ = stitch(strips, StitchOptions(maxMegapixels=1.0))
+        assert small_width < full_width
 
     def test_quality_affects_size(self) -> None:
         strips = _strips(_textured_scene())

@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
 import { JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
 import { OnJob } from 'src/decorators';
+import { mapAsset } from 'src/dtos/asset-response.dto';
+import { AuthDto } from 'src/dtos/auth.dto';
+import { PanoramaGroupResponseDto, PanoramaGroupSearchDto, PanoramaGroupUpdateDto } from 'src/dtos/panorama.dto';
 import {
   AssetType,
   AssetVisibility,
@@ -9,6 +12,7 @@ import {
   JobName,
   JobStatus,
   PanoramaGroupStatus,
+  Permission,
   QueueName,
   StorageFolder,
 } from 'src/enum';
@@ -70,6 +74,100 @@ export const isSameSeries = (a: PanoramaStreamRow, b: PanoramaStreamRow) =>
 
 @Injectable()
 export class PanoramaService extends BaseService {
+  async getAll(auth: AuthDto, dto: PanoramaGroupSearchDto): Promise<PanoramaGroupResponseDto[]> {
+    const groups = await this.panoramaRepository.getAllForUser(auth.user.id, dto.status);
+    const assetIds = groups.flatMap((group) => group.members.map((member) => member.assetId));
+    const assets = assetIds.length > 0 ? await this.assetRepository.getByIdsWithAllRelationsButStacks(assetIds) : [];
+    const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+    return groups
+      .map((group) => this.mapGroup(auth, group, assetById))
+      .filter((group) => group.assets.length >= 2);
+  }
+
+  async get(auth: AuthDto, id: string): Promise<PanoramaGroupResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.PanoramaRead, ids: [id] });
+    return this.load(auth, id);
+  }
+
+  async preview(auth: AuthDto, id: string): Promise<StreamableFile> {
+    await this.requireAccess({ auth, permission: Permission.PanoramaRead, ids: [id] });
+    const group = await this.panoramaRepository.getById(id);
+    if (!group) {
+      throw new NotFoundException('Panorama group not found');
+    }
+    const memberIds = group.members.map((member) => member.assetId);
+    const assets = await this.assetJobRepository.getForPanoramaDetect(memberIds);
+    const byId = new Map(assets.map((asset) => [asset.id, asset]));
+    const previews = memberIds
+      .map((assetId) => byId.get(assetId)?.previewFile)
+      .filter((path): path is string => !!path);
+    if (previews.length < 2) {
+      throw new BadRequestException('Not enough source previews are available for this group');
+    }
+    const { data } = await this.machineLearningRepository.panoramaStitch(previews, {
+      quality: 85,
+      compositeResolution: 'preview',
+    });
+    return new StreamableFile(data, { type: 'image/jpeg' });
+  }
+
+  async queueStitch(auth: AuthDto, id: string): Promise<void> {
+    await this.requireAccess({ auth, permission: Permission.PanoramaUpdate, ids: [id] });
+    const group = await this.panoramaRepository.getById(id);
+    if (!group) {
+      throw new NotFoundException('Panorama group not found');
+    }
+    if (group.status !== PanoramaGroupStatus.Candidate && group.status !== PanoramaGroupStatus.Failed) {
+      throw new BadRequestException(`Cannot stitch a group with status '${group.status}'`);
+    }
+    await this.jobRepository.queue({ name: JobName.PanoramaStitch, data: { id } });
+  }
+
+  async update(auth: AuthDto, id: string, dto: PanoramaGroupUpdateDto): Promise<PanoramaGroupResponseDto> {
+    await this.requireAccess({ auth, permission: Permission.PanoramaUpdate, ids: [id] });
+    const group = await this.panoramaRepository.getById(id);
+    if (!group) {
+      throw new NotFoundException('Panorama group not found');
+    }
+    const allowed =
+      (group.status === PanoramaGroupStatus.Candidate && dto.status === PanoramaGroupStatus.Dismissed) ||
+      (group.status === PanoramaGroupStatus.Dismissed && dto.status === PanoramaGroupStatus.Candidate) ||
+      (group.status === PanoramaGroupStatus.Failed && dto.status === PanoramaGroupStatus.Dismissed);
+    if (!allowed) {
+      throw new BadRequestException(`Cannot change status from '${group.status}' to '${dto.status}'`);
+    }
+    await this.panoramaRepository.update(id, { status: dto.status });
+    return this.load(auth, id);
+  }
+
+  private async load(auth: AuthDto, id: string): Promise<PanoramaGroupResponseDto> {
+    const group = await this.panoramaRepository.getById(id);
+    if (!group) {
+      throw new NotFoundException('Panorama group not found');
+    }
+    const assetIds = group.members.map((member) => member.assetId);
+    const assets = await this.assetRepository.getByIdsWithAllRelationsButStacks(assetIds);
+    return this.mapGroup(auth, group, new Map(assets.map((asset) => [asset.id, asset])));
+  }
+
+  private mapGroup(
+    auth: AuthDto,
+    group: NonNullable<Awaited<ReturnType<PanoramaService['panoramaRepository']['getById']>>>,
+    assetById: Map<string, Parameters<typeof mapAsset>[0]>,
+  ): PanoramaGroupResponseDto {
+    return {
+      id: group.id,
+      status: group.status,
+      score: group.score,
+      resultAssetId: group.resultAssetId,
+      createdAt: group.createdAt.toISOString(),
+      assets: group.members
+        .map((member) => assetById.get(member.assetId))
+        .filter((asset): asset is NonNullable<typeof asset> => !!asset)
+        .map((asset) => mapAsset(asset, { auth })),
+    };
+  }
+
   @OnJob({ name: JobName.PanoramaQueueAll, queue: QueueName.Panorama })
   async handleQueueAll({ force }: JobOf<JobName.PanoramaQueueAll>): Promise<JobStatus> {
     const { machineLearning } = await this.getConfig({ withCache: false });

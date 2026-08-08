@@ -241,6 +241,11 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
       return access.duplicate.checkOwnerAccess(auth.user.id, ids);
     }
 
+    case Permission.PanoramaRead:
+    case Permission.PanoramaUpdate: {
+      return access.panorama.checkOwnerAccess(auth.user.id, ids);
+    }
+
     case Permission.AuthDeviceDelete: {
       return await access.authDevice.checkOwnerAccess(auth.user.id, ids);
     }

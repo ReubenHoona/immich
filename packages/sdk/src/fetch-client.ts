@@ -1241,6 +1241,7 @@ export type QueuesResponseLegacyDto = {
     migration: QueueResponseLegacyDto;
     notifications: QueueResponseLegacyDto;
     ocr: QueueResponseLegacyDto;
+    panorama: QueueResponseLegacyDto;
     search: QueueResponseLegacyDto;
     sidecar: QueueResponseLegacyDto;
     smartSearch: QueueResponseLegacyDto;
@@ -1425,6 +1426,22 @@ export type OAuthCallbackDto = {
     state?: string;
     /** OAuth callback URL */
     url: string;
+};
+export type PanoramaGroupResponseDto = {
+    /** Source frames, in sweep order */
+    assets: AssetResponseDto[];
+    /** When the group was detected */
+    createdAt: string;
+    /** Panorama group ID */
+    id: string;
+    /** The stitched panorama asset, once generated */
+    resultAssetId: string | null;
+    /** Detection confidence score (higher is better) */
+    score: number;
+    status: PanoramaGroupStatus;
+};
+export type PanoramaGroupUpdateDto = {
+    status: PanoramaGroupUpdateStatus;
 };
 export type PartnerResponseDto = {
     avatarColor: UserAvatarColor;
@@ -2037,6 +2054,8 @@ export type ServerFeaturesDto = {
     oauthAutoLaunch: boolean;
     /** Whether OCR is enabled */
     ocr: boolean;
+    /** Whether panorama detection is enabled */
+    panorama: boolean;
     /** Whether password login is enabled */
     passwordLogin: boolean;
     /** Whether real-time transcoding is enabled */
@@ -2407,6 +2426,7 @@ export type SystemConfigJobDto = {
     migration: JobSettingsDto;
     notifications: JobSettingsDto;
     ocr: JobSettingsDto;
+    panorama: JobSettingsDto;
     search: JobSettingsDto;
     sidecar: JobSettingsDto;
     smartSearch: JobSettingsDto;
@@ -2475,6 +2495,34 @@ export type OcrConfig = {
     /** Name of the model to use */
     modelName: string;
 };
+export type PanoramaConfig = {
+    /** Automatically stitch detected panoramas without review */
+    autoStitch: boolean;
+    /** Stitch at full original resolution or fast preview resolution */
+    compositeResolution: CompositeResolution;
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Maximum frames stitched into one panorama */
+    maxFrames: number;
+    /** Maximum seconds between consecutive shots in a sweep */
+    maxGapSeconds: number;
+    /** Maximum pairwise frame overlap for a sweep link (higher is a duplicate) */
+    maxOverlap: number;
+    /** Minimum camera sweep displacement between frames, as a fraction of frame size */
+    minDisplacement: number;
+    /** Minimum frames for a panorama group */
+    minFrames: number;
+    /** Minimum RANSAC inlier matches for a valid link */
+    minInliers: number;
+    /** Minimum pairwise frame overlap for a sweep link */
+    minOverlap: number;
+    /** Name of the model to use */
+    modelName: string;
+    /** JPEG quality of the stitched panorama */
+    quality: number;
+    /** Stack the source frames under the generated panorama */
+    stackSources: boolean;
+};
 export type SystemConfigMachineLearningDto = {
     availabilityChecks: MachineLearningAvailabilityChecksDto;
     clip: ClipConfig;
@@ -2483,6 +2531,7 @@ export type SystemConfigMachineLearningDto = {
     enabled: boolean;
     facialRecognition: FacialRecognitionConfig;
     ocr: OcrConfig;
+    panorama: PanoramaConfig;
     /** ML service URLs */
     urls: string[];
 };
@@ -5281,6 +5330,75 @@ export function unlinkOAuthAccount(opts?: Oazapfts.RequestOpts) {
     }));
 }
 /**
+ * Retrieve panorama groups
+ */
+export function getPanoramas({ status }: {
+    status?: PanoramaGroupStatus;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PanoramaGroupResponseDto[];
+    }>(`/panoramas${QS.query(QS.explode({
+        status
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Retrieve a panorama group
+ */
+export function getPanorama({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PanoramaGroupResponseDto;
+    }>(`/panoramas/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Update a panorama group
+ */
+export function updatePanorama({ id, panoramaGroupUpdateDto }: {
+    id: string;
+    panoramaGroupUpdateDto: PanoramaGroupUpdateDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: PanoramaGroupResponseDto;
+    }>(`/panoramas/${encodeURIComponent(id)}`, oazapfts.json({
+        ...opts,
+        method: "PUT",
+        body: panoramaGroupUpdateDto
+    })));
+}
+/**
+ * Preview a panorama
+ */
+export function previewPanorama({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchBlob<{
+        status: 200;
+        data: Blob;
+    }>(`/panoramas/${encodeURIComponent(id)}/preview`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Generate a panorama
+ */
+export function stitchPanorama({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchText(`/panoramas/${encodeURIComponent(id)}/stitch`, {
+        ...opts,
+        method: "PUT"
+    }));
+}
+/**
  * Retrieve partners
  */
 export function getPartners({ direction }: {
@@ -7233,6 +7351,8 @@ export enum Permission {
     NotificationRead = "notification.read",
     NotificationUpdate = "notification.update",
     NotificationDelete = "notification.delete",
+    PanoramaRead = "panorama.read",
+    PanoramaUpdate = "panorama.update",
     PartnerCreate = "partner.create",
     PartnerRead = "partner.read",
     PartnerUpdate = "partner.update",
@@ -7397,7 +7517,8 @@ export enum QueueName {
     Ocr = "ocr",
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
-    Editor = "editor"
+    Editor = "editor",
+    Panorama = "panorama"
 }
 export enum QueueCommand {
     Start = "start",
@@ -7413,6 +7534,17 @@ export enum MemorySearchOrder {
 }
 export enum MemoryType {
     OnThisDay = "on_this_day"
+}
+export enum PanoramaGroupStatus {
+    Candidate = "candidate",
+    Dismissed = "dismissed",
+    Processing = "processing",
+    Completed = "completed",
+    Failed = "failed"
+}
+export enum PanoramaGroupUpdateStatus {
+    Candidate = "candidate",
+    Dismissed = "dismissed"
 }
 export enum PartnerDirection {
     SharedBy = "shared-by",
@@ -7489,6 +7621,9 @@ export enum JobName {
     VersionCheck = "VersionCheck",
     OcrQueueAll = "OcrQueueAll",
     Ocr = "Ocr",
+    PanoramaQueueAll = "PanoramaQueueAll",
+    PanoramaDetect = "PanoramaDetect",
+    PanoramaStitch = "PanoramaStitch",
     WorkflowAssetTrigger = "WorkflowAssetTrigger",
     IntegrityUntrackedFilesQueueAll = "IntegrityUntrackedFilesQueueAll",
     IntegrityUntrackedFiles = "IntegrityUntrackedFiles",
@@ -7673,6 +7808,10 @@ export enum LogLevel {
     Warn = "warn",
     Error = "error",
     Fatal = "fatal"
+}
+export enum CompositeResolution {
+    Full = "full",
+    Preview = "preview"
 }
 export enum ReleaseChannel {
     Stable = "stable",

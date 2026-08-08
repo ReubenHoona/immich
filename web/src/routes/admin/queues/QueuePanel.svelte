@@ -75,6 +75,11 @@
       missingText: $t('missing'),
       disabled: !featureFlags.ocr,
     },
+    [QueueName.Panorama]: {
+      allText: $t('all'),
+      missingText: $t('missing'),
+      disabled: !featureFlags.panorama,
+    },
     [QueueName.VideoConversion]: {
       allText: $t('all'),
       missingText: $t('missing'),

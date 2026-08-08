@@ -3,22 +3,27 @@
   import ObtainiumConfigModal from '$lib/modals/ObtainiumConfigModal.svelte';
   import { Route } from '$lib/route';
   import { Icon, modalManager, Text } from '@immich/ui';
+  import { featureFlagsManager } from '$lib/managers/feature-flags-manager.svelte';
   import {
     mdiCellphoneArrowDownVariant,
     mdiContentDuplicate,
     mdiCrosshairsGps,
     mdiImageSizeSelectLarge,
     mdiLinkEdit,
+    mdiPanorama,
     mdiStateMachine,
   } from '@mdi/js';
   import { t } from 'svelte-i18n';
 
-  const links = [
+  const links = $derived([
     { href: Route.duplicatesUtility(), icon: mdiContentDuplicate, label: $t('review_duplicates') },
     { href: Route.largeFileUtility(), icon: mdiImageSizeSelectLarge, label: $t('review_large_files') },
+    ...(featureFlagsManager.value.panorama
+      ? [{ href: Route.panoramasUtility(), icon: mdiPanorama, label: $t('review_panoramas') }]
+      : []),
     { href: Route.geolocationUtility(), icon: mdiCrosshairsGps, label: $t('manage_geolocation') },
     { href: Route.workflows(), icon: mdiStateMachine, label: $t('workflows') },
-  ];
+  ]);
 </script>
 
 <div class="rounded-3xl border border-gray-300 pt-1 pb-6 dark:border-immich-dark-gray dark:text-white">

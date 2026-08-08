@@ -320,6 +320,26 @@ class DuplicateAccess {
   }
 }
 
+class PanoramaAccess {
+  constructor(private db: Kysely<DB>) {}
+
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @ChunkedSet({ paramIndex: 1 })
+  async checkOwnerAccess(userId: string, panoramaIds: Set<string>) {
+    if (panoramaIds.size === 0) {
+      return new Set<string>();
+    }
+
+    return this.db
+      .selectFrom('panorama_group')
+      .select('panorama_group.id')
+      .where('panorama_group.id', 'in', [...panoramaIds])
+      .where('panorama_group.ownerId', '=', userId)
+      .execute()
+      .then((groups) => new Set(groups.map((group) => group.id)));
+  }
+}
+
 class NotificationAccess {
   constructor(private db: Kysely<DB>) {}
 
@@ -526,6 +546,7 @@ export class AccessRepository {
   duplicate: DuplicateAccess;
   memory: MemoryAccess;
   notification: NotificationAccess;
+  panorama: PanoramaAccess;
   person: PersonAccess;
   partner: PartnerAccess;
   session: SessionAccess;
@@ -542,6 +563,7 @@ export class AccessRepository {
     this.duplicate = new DuplicateAccess(db);
     this.memory = new MemoryAccess(db);
     this.notification = new NotificationAccess(db);
+    this.panorama = new PanoramaAccess(db);
     this.person = new PersonAccess(db);
     this.partner = new PartnerAccess(db);
     this.session = new SessionAccess(db);

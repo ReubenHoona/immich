@@ -367,6 +367,7 @@ export class AssetRepository {
               facesRecognizedAt: eb.ref('excluded.facesRecognizedAt'),
               metadataExtractedAt: eb.ref('excluded.metadataExtractedAt'),
               ocrAt: eb.ref('excluded.ocrAt'),
+              panoramaAt: eb.ref('excluded.panoramaAt'),
             },
             values[0],
           ),

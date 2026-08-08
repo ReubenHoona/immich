@@ -8399,6 +8399,295 @@
         "x-immich-state": "Stable"
       }
     },
+    "/panoramas": {
+      "get": {
+        "description": "Retrieve detected panorama groups for the authenticated user, best candidates first.",
+        "operationId": "getPanoramas",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by group status",
+            "schema": {
+              "$ref": "#/components/schemas/PanoramaGroupStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PanoramaGroupResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve panorama groups",
+        "tags": [
+          "Panoramas"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "panorama.read",
+        "x-immich-state": "Alpha"
+      }
+    },
+    "/panoramas/{id}": {
+      "get": {
+        "description": "Retrieve a single panorama group, including its source frames.",
+        "operationId": "getPanorama",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanoramaGroupResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a panorama group",
+        "tags": [
+          "Panoramas"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "panorama.read",
+        "x-immich-state": "Alpha"
+      },
+      "put": {
+        "description": "Dismiss a candidate panorama group, or restore a dismissed one.",
+        "operationId": "updatePanorama",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PanoramaGroupUpdateDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanoramaGroupResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Update a panorama group",
+        "tags": [
+          "Panoramas"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "panorama.update",
+        "x-immich-state": "Alpha"
+      }
+    },
+    "/panoramas/{id}/preview": {
+      "post": {
+        "description": "Synchronously stitch the group at preview resolution and return the JPEG. Nothing is saved to the library.",
+        "operationId": "previewPanorama",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Preview a panorama",
+        "tags": [
+          "Panoramas"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "panorama.read",
+        "x-immich-state": "Alpha"
+      }
+    },
+    "/panoramas/{id}/stitch": {
+      "put": {
+        "description": "Queue the full-quality stitch job for this group. The result is saved as a new library asset.",
+        "operationId": "stitchPanorama",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Generate a panorama",
+        "tags": [
+          "Panoramas"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "panorama.update",
+        "x-immich-state": "Alpha"
+      }
+    },
     "/partners": {
       "get": {
         "description": "Retrieve a list of partners with whom assets are shared.",
@@ -16322,6 +16611,10 @@
       "description": "Notification administrative endpoints."
     },
     {
+      "name": "Panoramas",
+      "description": "A panorama group is a set of consecutive shots detected as a camera sweep that can be stitched into a panorama."
+    },
+    {
       "name": "Partners",
       "description": "A partner is a link with another user that allows sharing of assets between two users."
     },
@@ -19314,6 +19607,9 @@
           "VersionCheck",
           "OcrQueueAll",
           "Ocr",
+          "PanoramaQueueAll",
+          "PanoramaDetect",
+          "PanoramaStitch",
           "WorkflowAssetTrigger",
           "IntegrityUntrackedFilesQueueAll",
           "IntegrityUntrackedFiles",
@@ -20656,6 +20952,178 @@
         ],
         "type": "object"
       },
+      "PanoramaConfig": {
+        "properties": {
+          "autoStitch": {
+            "description": "Automatically stitch detected panoramas without review",
+            "type": "boolean"
+          },
+          "compositeResolution": {
+            "description": "Stitch at full original resolution or fast preview resolution",
+            "enum": [
+              "full",
+              "preview"
+            ],
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "maxFrames": {
+            "description": "Maximum frames stitched into one panorama",
+            "maximum": 16,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "maxGapSeconds": {
+            "description": "Maximum seconds between consecutive shots in a sweep",
+            "maximum": 120,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "maxOverlap": {
+            "description": "Maximum pairwise frame overlap for a sweep link (higher is a duplicate)",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "minDisplacement": {
+            "description": "Minimum camera sweep displacement between frames, as a fraction of frame size",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "minFrames": {
+            "description": "Minimum frames for a panorama group",
+            "maximum": 16,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "minInliers": {
+            "description": "Minimum RANSAC inlier matches for a valid link",
+            "maximum": 9007199254740991,
+            "minimum": 4,
+            "type": "integer"
+          },
+          "minOverlap": {
+            "description": "Minimum pairwise frame overlap for a sweep link",
+            "format": "double",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          "modelName": {
+            "description": "Name of the model to use",
+            "type": "string"
+          },
+          "quality": {
+            "description": "JPEG quality of the stitched panorama",
+            "maximum": 100,
+            "minimum": 50,
+            "type": "integer"
+          },
+          "stackSources": {
+            "description": "Stack the source frames under the generated panorama",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "autoStitch",
+          "compositeResolution",
+          "enabled",
+          "maxFrames",
+          "maxGapSeconds",
+          "maxOverlap",
+          "minDisplacement",
+          "minFrames",
+          "minInliers",
+          "minOverlap",
+          "modelName",
+          "quality",
+          "stackSources"
+        ],
+        "type": "object"
+      },
+      "PanoramaGroupResponseDto": {
+        "properties": {
+          "assets": {
+            "description": "Source frames, in sweep order",
+            "items": {
+              "$ref": "#/components/schemas/AssetResponseDto"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "description": "When the group was detected",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+            "type": "string"
+          },
+          "id": {
+            "description": "Panorama group ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "resultAssetId": {
+            "description": "The stitched panorama asset, once generated",
+            "format": "uuid",
+            "nullable": true,
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "score": {
+            "description": "Detection confidence score (higher is better)",
+            "format": "double",
+            "type": "number"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PanoramaGroupStatus"
+          }
+        },
+        "required": [
+          "assets",
+          "createdAt",
+          "id",
+          "resultAssetId",
+          "score",
+          "status"
+        ],
+        "type": "object"
+      },
+      "PanoramaGroupStatus": {
+        "description": "Panorama group status",
+        "enum": [
+          "candidate",
+          "dismissed",
+          "processing",
+          "completed",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "PanoramaGroupUpdateDto": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PanoramaGroupUpdateStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "PanoramaGroupUpdateStatus": {
+        "description": "Dismiss a candidate group, or restore a dismissed one",
+        "enum": [
+          "candidate",
+          "dismissed"
+        ],
+        "type": "string"
+      },
       "PartnerCreateDto": {
         "properties": {
           "sharedWithId": {
@@ -20956,6 +21424,8 @@
           "notification.read",
           "notification.update",
           "notification.delete",
+          "panorama.read",
+          "panorama.update",
           "partner.create",
           "partner.read",
           "partner.update",
@@ -21597,7 +22067,8 @@
           "ocr",
           "workflow",
           "integrityCheck",
-          "editor"
+          "editor",
+          "panorama"
         ],
         "type": "string"
       },
@@ -21749,6 +22220,9 @@
           "ocr": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "panorama": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "search": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -21784,6 +22258,7 @@
           "migration",
           "notifications",
           "ocr",
+          "panorama",
           "search",
           "sidecar",
           "smartSearch",
@@ -22569,6 +23044,10 @@
             "description": "Whether OCR is enabled",
             "type": "boolean"
           },
+          "panorama": {
+            "description": "Whether panorama detection is enabled",
+            "type": "boolean"
+          },
           "passwordLogin": {
             "description": "Whether password login is enabled",
             "type": "boolean"
@@ -22608,6 +23087,7 @@
           "oauth",
           "oauthAutoLaunch",
           "ocr",
+          "panorama",
           "passwordLogin",
           "realtimeTranscoding",
           "reverseGeocoding",
@@ -26019,6 +26499,9 @@
           "ocr": {
             "$ref": "#/components/schemas/JobSettingsDto"
           },
+          "panorama": {
+            "$ref": "#/components/schemas/JobSettingsDto"
+          },
           "search": {
             "$ref": "#/components/schemas/JobSettingsDto"
           },
@@ -26048,6 +26531,7 @@
           "migration",
           "notifications",
           "ocr",
+          "panorama",
           "search",
           "sidecar",
           "smartSearch",
@@ -26138,6 +26622,9 @@
           "ocr": {
             "$ref": "#/components/schemas/OcrConfig"
           },
+          "panorama": {
+            "$ref": "#/components/schemas/PanoramaConfig"
+          },
           "urls": {
             "description": "ML service URLs",
             "items": {
@@ -26154,6 +26641,7 @@
           "enabled",
           "facialRecognition",
           "ocr",
+          "panorama",
           "urls"
         ],
         "type": "object"

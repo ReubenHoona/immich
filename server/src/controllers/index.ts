@@ -19,6 +19,7 @@ import { MemoryController } from 'src/controllers/memory.controller';
 import { NotificationAdminController } from 'src/controllers/notification-admin.controller';
 import { NotificationController } from 'src/controllers/notification.controller';
 import { OAuthController } from 'src/controllers/oauth.controller';
+import { PanoramaController } from 'src/controllers/panorama.controller';
 import { PartnerController } from 'src/controllers/partner.controller';
 import { PersonController } from 'src/controllers/person.controller';
 import { PluginController } from 'src/controllers/plugin.controller';
@@ -62,6 +63,7 @@ export const controllers = [
   NotificationController,
   NotificationAdminController,
   OAuthController,
+  PanoramaController,
   PartnerController,
   PersonController,
   PluginController,

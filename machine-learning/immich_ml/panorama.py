@@ -262,9 +262,18 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         frames = [_downscale(frame, PREVIEW_MAX_DIM) for frame in frames]
     total_megapixels = sum(frame.shape[0] * frame.shape[1] for frame in frames) / 1e6
     if total_megapixels > options.maxMegapixels:
-        raise PanoramaError(
-            413, f"Input too large: {total_megapixels:.0f}MP exceeds cap of {options.maxMegapixels:.0f}MP"
-        )
+        # Scale all frames proportionally to fit the memory budget instead of failing —
+        # e.g. ten 50MP frames come down to ~40MP each rather than erroring out.
+        scale = (options.maxMegapixels / total_megapixels) ** 0.5
+        frames = [
+            cv2.resize(
+                frame,
+                (max(1, int(frame.shape[1] * scale)), max(1, int(frame.shape[0] * scale))),
+                interpolation=cv2.INTER_AREA,
+            )
+            for frame in frames
+        ]
+        log.info(f"Panorama input {total_megapixels:.0f}MP over {options.maxMegapixels:.0f}MP budget, scaled by {scale:.2f}")
 
     stitcher = cv2.Stitcher_create(cv2.Stitcher_PANORAMA)
     stitcher.setPanoConfidenceThresh(0.6)

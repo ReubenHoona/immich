@@ -325,6 +325,152 @@
           />
         </div>
       </SettingAccordion>
+
+      <SettingAccordion
+        key="panorama"
+        title={$t('admin.machine_learning_panorama')}
+        subtitle={$t('admin.machine_learning_panorama_description')}
+      >
+        <div class="mt-4 ml-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_panorama_enabled')}
+            subtitle={$t('admin.machine_learning_panorama_enabled_description')}
+            bind:checked={configToEdit.machineLearning.panorama.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_max_gap_seconds')}
+            description={$t('admin.machine_learning_panorama_max_gap_seconds_description')}
+            bind:value={configToEdit.machineLearning.panorama.maxGapSeconds}
+            min={1}
+            max={120}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.maxGapSeconds !==
+              config.machineLearning.panorama.maxGapSeconds}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_min_frames')}
+            description={$t('admin.machine_learning_panorama_min_frames_description')}
+            bind:value={configToEdit.machineLearning.panorama.minFrames}
+            min={2}
+            max={16}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.minFrames !== config.machineLearning.panorama.minFrames}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_max_frames')}
+            description={$t('admin.machine_learning_panorama_max_frames_description')}
+            bind:value={configToEdit.machineLearning.panorama.maxFrames}
+            min={2}
+            max={16}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.maxFrames !== config.machineLearning.panorama.maxFrames}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_min_overlap')}
+            description={$t('admin.machine_learning_panorama_min_overlap_description')}
+            bind:value={configToEdit.machineLearning.panorama.minOverlap}
+            step="0.01"
+            min={0}
+            max={1}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.minOverlap !== config.machineLearning.panorama.minOverlap}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_max_overlap')}
+            description={$t('admin.machine_learning_panorama_max_overlap_description')}
+            bind:value={configToEdit.machineLearning.panorama.maxOverlap}
+            step="0.01"
+            min={0}
+            max={1}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.maxOverlap !== config.machineLearning.panorama.maxOverlap}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_min_inliers')}
+            description={$t('admin.machine_learning_panorama_min_inliers_description')}
+            bind:value={configToEdit.machineLearning.panorama.minInliers}
+            min={4}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.minInliers !== config.machineLearning.panorama.minInliers}
+          />
+
+          <hr />
+
+          <SettingSwitch
+            title={$t('admin.machine_learning_panorama_auto_stitch')}
+            subtitle={$t('admin.machine_learning_panorama_auto_stitch_description')}
+            bind:checked={configToEdit.machineLearning.panorama.autoStitch}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+          />
+
+          <SettingSwitch
+            title={$t('admin.machine_learning_panorama_stack_sources')}
+            subtitle={$t('admin.machine_learning_panorama_stack_sources_description')}
+            bind:checked={configToEdit.machineLearning.panorama.stackSources}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_panorama_quality')}
+            description={$t('admin.machine_learning_panorama_quality_description')}
+            bind:value={configToEdit.machineLearning.panorama.quality}
+            min={50}
+            max={100}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.quality !== config.machineLearning.panorama.quality}
+          />
+
+          <SettingSelect
+            label={$t('admin.machine_learning_panorama_composite_resolution')}
+            desc={$t('admin.machine_learning_panorama_composite_resolution_description')}
+            name="panorama-composite-resolution"
+            bind:value={configToEdit.machineLearning.panorama.compositeResolution}
+            options={[
+              { text: $t('admin.machine_learning_panorama_composite_resolution_full'), value: 'full' },
+              { text: $t('admin.machine_learning_panorama_composite_resolution_preview'), value: 'preview' },
+            ]}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+            isEdited={configToEdit.machineLearning.panorama.compositeResolution !==
+              config.machineLearning.panorama.compositeResolution}
+          />
+        </div>
+      </SettingAccordion>
       <SettingButtonsRow bind:configToEdit keys={['machineLearning']} {disabled} />
     </form>
   </div>
