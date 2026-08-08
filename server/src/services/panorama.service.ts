@@ -349,14 +349,15 @@ export class PanoramaService extends BaseService {
       });
 
       const ownerId = group.ownerId;
-      // Timeline placement comes from the middle frame. Deliberately no Make/Model:
+      // Timeline placement comes from the LAST frame, so the panorama lands right after
+      // its sweep instead of between its own source frames. Deliberately no Make/Model:
       // the result must never satisfy the clustering predicate itself.
-      const middle = frames[Math.floor(frames.length / 2)];
-      const dateTimeOriginal = middle.dateTimeOriginal ?? middle.fileCreatedAt;
+      const last = frames.at(-1) as (typeof frames)[number];
+      const dateTimeOriginal = last.dateTimeOriginal ?? last.fileCreatedAt;
       const asset = await this.createPanoramaAsset(ownerId, data, {
         dateTimeOriginal,
-        timeZone: middle.timeZone,
-        localDateTime: middle.localDateTime,
+        timeZone: last.timeZone,
+        localDateTime: last.localDateTime,
         suffix: '',
       });
 
@@ -365,8 +366,8 @@ export class PanoramaService extends BaseService {
       const rawAsset = config.rawPano
         ? await this.stitchRawTwin(frames, config, ownerId, {
             dateTimeOriginal,
-            timeZone: middle.timeZone,
-            localDateTime: middle.localDateTime,
+            timeZone: last.timeZone,
+            localDateTime: last.localDateTime,
           }).catch((error) => {
             this.logger.warn(`RAW panorama for group ${id} failed: ${error instanceof Error ? error.message : error}`);
             return null;

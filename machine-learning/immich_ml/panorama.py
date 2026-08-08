@@ -291,8 +291,10 @@ def _verify_sources(frames: list[NDArray[np.uint8]], pano: NDArray[np.uint8]) ->
     catches that. Low-texture frames (sky, plain walls) are skipped — too few features
     to judge either way.
     """
-    pano_gray = _downscale(cast(NDArray[np.uint8], cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY)), 2600)
-    orb_pano = cv2.ORB.create(nfeatures=8000)
+    # size the proxy so each frame still spans a few hundred pixels in a long panorama
+    verify_dim = min(8000, int(2600 * max(1.0, (len(frames) / 8) ** 0.5)))
+    pano_gray = _downscale(cast(NDArray[np.uint8], cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY)), verify_dim)
+    orb_pano = cv2.ORB.create(nfeatures=2000 + 1000 * len(frames))
     orb_frame = cv2.ORB.create(nfeatures=1500)
     pano_kp, pano_des = orb_pano.detectAndCompute(pano_gray, None)
     if pano_des is None:
@@ -385,8 +387,12 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         raise PanoramaError(422, f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
     if options.verifySources:
         missing = _verify_sources(frames, pano)
-        if missing:
+        if missing and len(frames) - len(missing) < max(2, len(frames) // 2):
             raise PanoramaError(422, f"Stitch failed verification: source frame(s) {missing} not found in the result")
+        if missing:
+            # the stitcher pruned some frames but the majority composed correctly —
+            # deliver the partial panorama rather than nothing
+            log.warning(f"Partial panorama: {len(missing)} of {len(frames)} frames not in the result ({missing})")
 
     params = [cv2.IMWRITE_JPEG_QUALITY, options.quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
     if options.quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):
