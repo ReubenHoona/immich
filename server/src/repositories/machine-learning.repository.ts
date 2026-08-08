@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Duration } from 'luxon';
+import { openAsBlob } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { MachineLearningConfig } from 'src/config';
 import { CLIPConfig } from 'src/dtos/model-config.dto';
@@ -269,8 +270,8 @@ export class MachineLearningRepository {
     const formData = new FormData();
     formData.append('options', JSON.stringify(options));
     for (const imagePath of imagePaths) {
-      const fileBuffer = await readFile(imagePath);
-      formData.append('images', new Blob([new Uint8Array(fileBuffer)]));
+      // file-backed blobs stream from disk — a stitch payload can be >100MB
+      formData.append('images', await openAsBlob(imagePath));
     }
     return formData;
   }
@@ -321,7 +322,11 @@ export class MachineLearningRepository {
         if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) {
           throw new Error(`Panorama stitch timed out against "${url}"`);
         }
-        throw error instanceof Error ? error : new Error(String(error));
+        if (error instanceof Error) {
+          const cause = error.cause instanceof Error ? ` (${error.cause.message})` : '';
+          throw new Error(`${error.message}${cause}`);
+        }
+        throw new Error(String(error));
       }
     }
 
