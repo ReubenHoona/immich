@@ -20972,7 +20972,7 @@
           },
           "maxFrames": {
             "description": "Maximum frames stitched into one panorama",
-            "maximum": 16,
+            "maximum": 32,
             "minimum": 2,
             "type": "integer"
           },
@@ -20998,7 +20998,7 @@
           },
           "minFrames": {
             "description": "Minimum frames for a panorama group",
-            "maximum": 16,
+            "maximum": 32,
             "minimum": 2,
             "type": "integer"
           },

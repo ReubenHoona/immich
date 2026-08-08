@@ -142,7 +142,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
       modelName: 'orb-classic',
       maxGapSeconds: 30,
       minFrames: 2,
-      maxFrames: 10,
+      maxFrames: 16,
       minOverlap: 0.1,
       maxOverlap: 0.85,
       minInliers: 22,

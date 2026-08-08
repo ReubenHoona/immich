@@ -361,7 +361,7 @@
             description={$t('admin.machine_learning_panorama_min_frames_description')}
             bind:value={configToEdit.machineLearning.panorama.minFrames}
             min={2}
-            max={16}
+            max={32}
             disabled={disabled ||
               !configToEdit.machineLearning.enabled ||
               !configToEdit.machineLearning.panorama.enabled}
@@ -374,7 +374,7 @@
             description={$t('admin.machine_learning_panorama_max_frames_description')}
             bind:value={configToEdit.machineLearning.panorama.maxFrames}
             min={2}
-            max={16}
+            max={32}
             disabled={disabled ||
               !configToEdit.machineLearning.enabled ||
               !configToEdit.machineLearning.panorama.enabled}

@@ -56,8 +56,8 @@ export const OcrConfigSchema = ModelConfigSchema.extend({
 
 export const PanoramaConfigSchema = ModelConfigSchema.extend({
   maxGapSeconds: z.int().min(1).max(120).describe('Maximum seconds between consecutive shots in a sweep'),
-  minFrames: z.int().min(2).max(16).describe('Minimum frames for a panorama group'),
-  maxFrames: z.int().min(2).max(16).describe('Maximum frames stitched into one panorama'),
+  minFrames: z.int().min(2).max(32).describe('Minimum frames for a panorama group'),
+  maxFrames: z.int().min(2).max(32).describe('Maximum frames stitched into one panorama'),
   minOverlap: z
     .number()
     .meta({ format: 'double' })

@@ -44,7 +44,7 @@ class StitchOptions(BaseModel):
     verifySources: bool = True
 
 
-MAX_FRAMES = 16
+MAX_FRAMES = 32
 PREVIEW_MAX_DIM = 1440
 
 

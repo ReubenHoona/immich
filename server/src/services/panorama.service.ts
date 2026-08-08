@@ -23,7 +23,7 @@ import { isAssetChecksumConstraint } from 'src/utils/database';
 import { isPanoramaEnabled } from 'src/utils/misc';
 
 /** Frames sent to detection per cluster; stitching is separately capped by config.maxFrames. */
-export const PANORAMA_DETECT_MAX_FRAMES = 16;
+export const PANORAMA_DETECT_MAX_FRAMES = 32;
 
 /** Twins closer than this are the same shot saved twice (e.g. RAW + JPEG). */
 const TWIN_MAX_GAP_MS = 2000;

@@ -93,7 +93,7 @@ class TestPanoramaDetect:
             detect([frame], DetectOptions())
         assert err.value.status_code == 400
         with pytest.raises(PanoramaError):
-            detect([frame] * 17, DetectOptions())
+            detect([frame] * 33, DetectOptions())
 
     def test_invalid_image_bytes(self) -> None:
         with pytest.raises(PanoramaError) as err:
