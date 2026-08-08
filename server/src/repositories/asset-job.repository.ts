@@ -513,6 +513,22 @@ export class AssetJobRepository {
       .execute();
   }
 
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.DATE, DummyValue.DATE] })
+  getPanoramaRawTwinCandidates(ownerId: string, from: Date, to: Date) {
+    const rawExtensions = ['dng', 'arw', 'cr2', 'cr3', 'nef', 'orf', 'raf', 'rw2'];
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select(['asset.id', 'asset.originalPath', 'asset.originalFileName', 'asset_exif.dateTimeOriginal'])
+      .where('asset.ownerId', '=', ownerId)
+      .where('asset.type', '=', AssetType.Image)
+      .where('asset.deletedAt', 'is', null)
+      .where((eb) => eb.or(rawExtensions.map((extension) => eb('asset.originalFileName', 'ilike', `%.${extension}`))))
+      .where('asset_exif.dateTimeOriginal', '>=', from)
+      .where('asset_exif.dateTimeOriginal', '<=', to)
+      .execute();
+  }
+
   @GenerateSql({ params: [[DummyValue.UUID]] })
   getForPanoramaStitch(ids: string[]) {
     return this.db

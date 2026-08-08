@@ -213,6 +213,8 @@
     "machine_learning_panorama_min_inliers_description": "Geometrically consistent feature matches required between neighboring frames",
     "machine_learning_panorama_min_overlap": "Minimum frame overlap",
     "machine_learning_panorama_min_overlap_description": "Frames overlapping less than this fraction are treated as unrelated",
+    "machine_learning_panorama_raw_pano": "RAW panorama",
+    "machine_learning_panorama_raw_pano_description": "When every frame has a RAW twin (RAW+JPEG shooting), also generate a second panorama developed from the RAW files",
     "machine_learning_panorama_quality": "JPEG quality",
     "machine_learning_panorama_quality_description": "Quality of the stitched panorama (50-100)",
     "machine_learning_panorama_stack_sources": "Stack source photos",

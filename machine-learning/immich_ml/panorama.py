@@ -75,7 +75,24 @@ def _decode(image: bytes, grayscale: bool = False) -> NDArray[np.uint8]:
     flags = cv2.IMREAD_GRAYSCALE if grayscale else cv2.IMREAD_COLOR
     mat = cv2.imdecode(np.frombuffer(image, dtype=np.uint8), flags)
     if mat is None:
+        mat = _decode_raw(image, grayscale)
+    if mat is None:
         raise PanoramaError(400, "Failed to decode an input image")
+    return cast(NDArray[np.uint8], mat)
+
+
+def _decode_raw(image: bytes, grayscale: bool) -> NDArray[np.uint8] | None:
+    """Develop camera RAW bytes (DNG etc.) that cv2 cannot decode."""
+    import io
+
+    try:
+        import rawpy
+
+        with rawpy.imread(io.BytesIO(image)) as raw:
+            rgb = raw.postprocess(use_camera_wb=True, output_bps=8)
+    except Exception:
+        return None
+    mat = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY if grayscale else cv2.COLOR_RGB2BGR)
     return cast(NDArray[np.uint8], mat)
 
 
@@ -328,26 +345,32 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
             f"Panorama input of {total_megapixels:.0f}MP exceeds {options.maxMegapixels:.0f}MP, scaling by {scale:.2f}"
         )
 
-    stitcher = cv2.Stitcher.create(cv2.Stitcher_PANORAMA)
-    stitcher.setPanoConfidenceThresh(0.6)
-    status, pano = stitcher.stitch(frames)
+    def try_stitch(mode: int, confidence: float) -> tuple[int, NDArray[np.uint8] | None]:
+        stitcher = cv2.Stitcher.create(mode)
+        stitcher.setPanoConfidenceThresh(confidence)
+        try:
+            status, pano = stitcher.stitch(frames)
+            return int(status), cast(NDArray[np.uint8] | None, pano)
+        except cv2.error as error:
+            # a divergent registration can blow past cv2's 32767px remap limit;
+            # treat it as a failed attempt rather than crashing the request
+            log.warning(f"Stitch attempt raised: {str(error).splitlines()[-1][:120]}")
+            return int(cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL), None
+
+    status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.6)
     if status != cv2.Stitcher_OK:
-        stitcher.setPanoConfidenceThresh(0.4)
-        status, pano = stitcher.stitch(frames)
+        status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.4)
     if status != cv2.Stitcher_OK:
         # flat subjects photographed close up (documents, boards) violate the rotational
         # model but stitch cleanly with the affine SCANS pipeline
-        stitcher = cv2.Stitcher.create(cv2.Stitcher_SCANS)
-        stitcher.setPanoConfidenceThresh(0.5)
-        status, pano = stitcher.stitch(frames)
-    if status != cv2.Stitcher_OK:
+        status, pano = try_stitch(cv2.Stitcher_SCANS, 0.5)
+    if status != cv2.Stitcher_OK or pano is None:
         reasons = {
             cv2.Stitcher_ERR_NEED_MORE_IMGS: "not enough overlapping content",
             cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL: "homography estimation failed",
             cv2.Stitcher_ERR_CAMERA_PARAMS_ADJUST_FAIL: "camera parameter adjustment failed",
         }
         raise PanoramaError(422, f"Stitch failed: {reasons.get(status, f'status {status}')}")
-    pano = cast(NDArray[np.uint8], pano)
     if options.cropAuto:
         pano = _autocrop(pano)
 

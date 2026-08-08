@@ -116,6 +116,7 @@ export type SystemConfig = {
       minDisplacement: number;
       autoStitch: boolean;
       stackSources: boolean;
+      rawPano: boolean;
       quality: number;
       compositeResolution: 'full' | 'preview';
     };
@@ -349,6 +350,7 @@ export const defaults = Object.freeze<SystemConfig>({
       minDisplacement: 0.12,
       autoStitch: false,
       stackSources: true,
+      rawPano: true,
       quality: 97,
       compositeResolution: 'full',
     },

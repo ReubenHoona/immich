@@ -21025,6 +21025,10 @@
             "minimum": 50,
             "type": "integer"
           },
+          "rawPano": {
+            "description": "Also produce a panorama developed from RAW twins when every frame has one",
+            "type": "boolean"
+          },
           "stackSources": {
             "description": "Stack the source frames under the generated panorama",
             "type": "boolean"
@@ -21043,6 +21047,7 @@
           "minOverlap",
           "modelName",
           "quality",
+          "rawPano",
           "stackSources"
         ],
         "type": "object"

@@ -441,6 +441,15 @@
               !configToEdit.machineLearning.panorama.enabled}
           />
 
+          <SettingSwitch
+            title={$t('admin.machine_learning_panorama_raw_pano')}
+            subtitle={$t('admin.machine_learning_panorama_raw_pano_description')}
+            bind:checked={configToEdit.machineLearning.panorama.rawPano}
+            disabled={disabled ||
+              !configToEdit.machineLearning.enabled ||
+              !configToEdit.machineLearning.panorama.enabled}
+          />
+
           <SettingInputField
             inputType={SettingInputFieldType.NUMBER}
             label={$t('admin.machine_learning_panorama_quality')}

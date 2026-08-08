@@ -149,6 +149,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
       minDisplacement: 0.12,
       autoStitch: false,
       stackSources: true,
+      rawPano: true,
       quality: 97,
       compositeResolution: 'full',
     },

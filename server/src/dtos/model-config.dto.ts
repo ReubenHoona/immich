@@ -79,6 +79,7 @@ export const PanoramaConfigSchema = ModelConfigSchema.extend({
     .describe('Minimum camera sweep displacement between frames, as a fraction of frame size'),
   autoStitch: z.boolean().describe('Automatically stitch detected panoramas without review'),
   stackSources: z.boolean().describe('Stack the source frames under the generated panorama'),
+  rawPano: z.boolean().describe('Also produce a panorama developed from RAW twins when every frame has one'),
   quality: z.int().min(50).max(100).describe('JPEG quality of the stitched panorama'),
   compositeResolution: z
     .enum(['full', 'preview'])

@@ -1,4 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException, StreamableFile } from '@nestjs/common';
+import { SystemConfig } from 'src/config';
 import { JOBS_ASSET_PAGINATION_SIZE } from 'src/constants';
 import { StorageCore } from 'src/cores/storage.core';
 import { OnJob } from 'src/decorators';
@@ -320,7 +321,6 @@ export class PanoramaService extends BaseService {
     }
     await this.panoramaRepository.update(id, { status: PanoramaGroupStatus.Processing });
 
-    let outputPath: string | null = null;
     try {
       const memberIds = group.members.map((member) => member.assetId);
       const assets = await this.assetJobRepository.getForPanoramaStitch(memberIds);
@@ -349,20 +349,83 @@ export class PanoramaService extends BaseService {
       });
 
       const ownerId = group.ownerId;
-      const panoramaId = this.cryptoRepository.randomUUID();
-      outputPath = StorageCore.getNestedPath(StorageFolder.Upload, ownerId, `${panoramaId}.jpg`);
-      this.storageCore.ensureFolders(outputPath);
-      await this.storageRepository.createFile(outputPath, data);
-
       // Timeline placement comes from the middle frame. Deliberately no Make/Model:
       // the result must never satisfy the clustering predicate itself.
       const middle = frames[Math.floor(frames.length / 2)];
       const dateTimeOriginal = middle.dateTimeOriginal ?? middle.fileCreatedAt;
-      await this.mediaRepository.writeExif({ dateTimeOriginal, timeZone: middle.timeZone }, outputPath);
+      const asset = await this.createPanoramaAsset(ownerId, data, {
+        dateTimeOriginal,
+        timeZone: middle.timeZone,
+        localDateTime: middle.localDateTime,
+        suffix: '',
+      });
+
+      // With RAW+JPEG shooting, produce a second panorama developed from the RAW
+      // twins — sources are never mixed: all frames must have a twin, or none is made.
+      const rawAsset = config.rawPano
+        ? await this.stitchRawTwin(frames, config, ownerId, {
+            dateTimeOriginal,
+            timeZone: middle.timeZone,
+            localDateTime: middle.localDateTime,
+          }).catch((error) => {
+            this.logger.warn(`RAW panorama for group ${id} failed: ${error instanceof Error ? error.message : error}`);
+            return null;
+          })
+        : null;
+
+      if (config.stackSources) {
+        try {
+          await this.stackRepository.create({ ownerId }, [
+            asset.id,
+            ...(rawAsset ? [rawAsset.id] : []),
+            ...memberIds,
+          ]);
+        } catch (error) {
+          this.logger.warn(`Could not stack panorama ${asset.id} with its sources: ${error}`);
+        }
+      }
+
+      const linkStats =
+        rawAsset && group.linkStats && typeof group.linkStats === 'object'
+          ? { ...group.linkStats, rawResultAssetId: rawAsset.id }
+          : rawAsset
+            ? { rawResultAssetId: rawAsset.id }
+            : undefined;
+      await this.panoramaRepository.update(id, {
+        status: PanoramaGroupStatus.Completed,
+        resultAssetId: asset.id,
+        ...(linkStats && { linkStats }),
+      });
+      this.logger.log(
+        `Stitched panorama ${asset.id} (${width}x${height}${rawAsset ? `, RAW twin ${rawAsset.id}` : ''}) from ${frames.length} frames`,
+      );
+      return JobStatus.Success;
+    } catch (error) {
+      this.logger.error(`Panorama stitch for group ${id} failed: ${error instanceof Error ? error.message : error}`);
+      await this.panoramaRepository.update(id, { status: PanoramaGroupStatus.Failed }).catch(() => {});
+      return JobStatus.Failed;
+    }
+  }
+
+  private async createPanoramaAsset(
+    ownerId: string,
+    data: Buffer,
+    meta: { dateTimeOriginal: Date; timeZone: string | null; localDateTime: Date; suffix: string },
+  ): Promise<{ id: string }> {
+    const panoramaId = this.cryptoRepository.randomUUID();
+    let outputPath: string | null = StorageCore.getNestedPath(StorageFolder.Upload, ownerId, `${panoramaId}.jpg`);
+    this.storageCore.ensureFolders(outputPath);
+    await this.storageRepository.createFile(outputPath, data);
+    try {
+      await this.mediaRepository.writeExif(
+        { dateTimeOriginal: meta.dateTimeOriginal, timeZone: meta.timeZone },
+        outputPath,
+      );
 
       const stats = await this.storageRepository.stat(outputPath);
       const checksum = await this.cryptoRepository.hashFile(outputPath);
       const checksumQuery = { ownerId, checksum };
+      const timestamp = meta.dateTimeOriginal.toISOString().replaceAll(/[:-]/g, '').slice(0, 15);
 
       let asset = await this.assetRepository.getByChecksum(checksumQuery);
       if (asset) {
@@ -377,12 +440,12 @@ export class PanoramaService extends BaseService {
             libraryId: null,
             type: AssetType.Image,
             originalPath: outputPath,
-            originalFileName: `PANO_${dateTimeOriginal.toISOString().replaceAll(/[:-]/g, '').slice(0, 15)}.jpg`,
+            originalFileName: `PANO_${timestamp}${meta.suffix}.jpg`,
             checksum,
             checksumAlgorithm: ChecksumAlgorithm.sha1File,
-            fileCreatedAt: dateTimeOriginal,
+            fileCreatedAt: meta.dateTimeOriginal,
             fileModifiedAt: stats.mtime,
-            localDateTime: middle.localDateTime,
+            localDateTime: meta.localDateTime,
             visibility: AssetVisibility.Timeline,
           });
           outputPath = null; // now owned by the asset record
@@ -403,25 +466,48 @@ export class PanoramaService extends BaseService {
         lockedPropertiesBehavior: 'override',
       });
       await this.jobRepository.queue({ name: JobName.AssetExtractMetadata, data: { id: asset.id, source: 'upload' } });
-
-      if (config.stackSources) {
-        try {
-          await this.stackRepository.create({ ownerId }, [asset.id, ...memberIds]);
-        } catch (error) {
-          this.logger.warn(`Could not stack panorama ${asset.id} with its sources: ${error}`);
-        }
-      }
-
-      await this.panoramaRepository.update(id, { status: PanoramaGroupStatus.Completed, resultAssetId: asset.id });
-      this.logger.log(`Stitched panorama ${asset.id} (${width}x${height}) from ${frames.length} frames`);
-      return JobStatus.Success;
+      return asset;
     } catch (error) {
-      this.logger.error(`Panorama stitch for group ${id} failed: ${error instanceof Error ? error.message : error}`);
       if (outputPath) {
         await this.storageRepository.unlink(outputPath).catch(() => {});
       }
-      await this.panoramaRepository.update(id, { status: PanoramaGroupStatus.Failed }).catch(() => {});
-      return JobStatus.Failed;
+      throw error;
     }
+  }
+
+  /** Stitch the RAW twins of the given frames — only when every frame has one. */
+  private async stitchRawTwin(
+    frames: { id: string; originalFileName: string; dateTimeOriginal: Date | null; fileCreatedAt: Date }[],
+    config: SystemConfig['machineLearning']['panorama'],
+    ownerId: string,
+    meta: { dateTimeOriginal: Date; timeZone: string | null; localDateTime: Date },
+  ): Promise<{ id: string } | null> {
+    const times = frames.map((frame) => (frame.dateTimeOriginal ?? frame.fileCreatedAt).getTime());
+    const from = new Date(Math.min(...times) - 3000);
+    const to = new Date(Math.max(...times) + 3000);
+    const candidates = await this.assetJobRepository.getPanoramaRawTwinCandidates(ownerId, from, to);
+
+    const twinPaths: string[] = [];
+    for (const frame of frames) {
+      const stem = normalizeStem(frame.originalFileName);
+      const frameTime = (frame.dateTimeOriginal ?? frame.fileCreatedAt).getTime();
+      const twin = candidates.find(
+        (candidate) =>
+          normalizeStem(candidate.originalFileName) === stem &&
+          candidate.dateTimeOriginal !== null &&
+          Math.abs(candidate.dateTimeOriginal.getTime() - frameTime) <= 2000,
+      );
+      if (!twin) {
+        this.logger.debug(`No RAW twin for ${frame.originalFileName}; skipping RAW panorama`);
+        return null;
+      }
+      twinPaths.push(twin.originalPath);
+    }
+
+    const { data } = await this.machineLearningRepository.panoramaStitch(twinPaths, {
+      quality: config.quality,
+      compositeResolution: config.compositeResolution,
+    });
+    return this.createPanoramaAsset(ownerId, data, { ...meta, suffix: '_RAW' });
   }
 }

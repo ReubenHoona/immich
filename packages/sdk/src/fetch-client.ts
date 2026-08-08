@@ -2520,6 +2520,8 @@ export type PanoramaConfig = {
     modelName: string;
     /** JPEG quality of the stitched panorama */
     quality: number;
+    /** Also produce a panorama developed from RAW twins when every frame has one */
+    rawPano: boolean;
     /** Stack the source frames under the generated panorama */
     stackSources: boolean;
 };
