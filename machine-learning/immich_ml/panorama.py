@@ -309,11 +309,15 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     if options.cropAuto:
         pano = _autocrop(pano)
 
-    # A structurally broken registration (e.g. a forward-motion sequence) can still return
-    # Stitcher_OK but collapse the scene into a smear far smaller than any input frame.
+    # A structurally broken registration can still return Stitcher_OK, either by
+    # collapsing the scene into a smear far smaller than any input frame, or by
+    # scattering fragments across a huge mostly-black canvas.
     median_frame_area = float(np.median([frame.shape[0] * frame.shape[1] for frame in frames]))
     if pano.shape[0] * pano.shape[1] < 0.5 * median_frame_area:
         raise PanoramaError(422, "Stitch failed: degenerate result (registration collapsed the scene)")
+    filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
+    if filled < 0.55:
+        raise PanoramaError(422, f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
 
     params = [cv2.IMWRITE_JPEG_QUALITY, options.quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
     if options.quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):
