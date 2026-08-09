@@ -327,11 +327,18 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     frames = [_decode(image) for image in images]
     if options.compositeResolution == "preview":
         frames = [_downscale(frame, PREVIEW_MAX_DIM) for frame in frames]
+    # long chains inflate warp/blend buffers beyond what total input megapixels predict;
+    # tighten the budget as frame count grows (measured: 13 frames at 400MP fits 6GB)
+    budget = (
+        min(options.maxMegapixels, options.maxMegapixels * 13.0 / len(frames))
+        if len(frames) > 13
+        else options.maxMegapixels
+    )
     total_megapixels = sum(frame.shape[0] * frame.shape[1] for frame in frames) / 1e6
-    if total_megapixels > options.maxMegapixels:
+    if total_megapixels > budget:
         # Scale all frames proportionally to fit the memory budget instead of failing —
         # e.g. ten 50MP frames come down to ~40MP each rather than erroring out.
-        scale = (options.maxMegapixels / total_megapixels) ** 0.5
+        scale = (budget / total_megapixels) ** 0.5
         frames = [
             cast(
                 NDArray[np.uint8],
@@ -343,9 +350,7 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
             )
             for frame in frames
         ]
-        log.info(
-            f"Panorama input of {total_megapixels:.0f}MP exceeds {options.maxMegapixels:.0f}MP, scaling by {scale:.2f}"
-        )
+        log.info(f"Panorama input of {total_megapixels:.0f}MP exceeds {budget:.0f}MP budget, scaling by {scale:.2f}")
 
     def try_stitch(mode: int, confidence: float) -> tuple[int, NDArray[np.uint8] | None]:
         stitcher = cv2.Stitcher.create(mode)
