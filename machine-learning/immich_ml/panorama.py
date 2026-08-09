@@ -388,7 +388,7 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     if pano.shape[0] * pano.shape[1] < 0.5 * median_frame_area:
         raise PanoramaError(422, "Stitch failed: degenerate result (registration collapsed the scene)")
     filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
-    if filled < 0.55:
+    if filled < 0.85:
         raise PanoramaError(422, f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
     if options.verifySources:
         missing = _verify_sources(frames, pano)
