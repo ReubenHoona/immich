@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Duration } from 'luxon';
 import { openAsBlob } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { MachineLearningConfig } from 'src/config';
 import { CLIPConfig } from 'src/dtos/model-config.dto';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -302,13 +303,18 @@ export class MachineLearningRepository {
     const formData = await this.getImagesFormData(imagePaths, options);
 
     // A stitch is minutes of CPU on the ML side: try each URL at most once and
-    // never retry after a timeout, so a slow stitch cannot be doubled up.
+    // never retry after a timeout, so a slow stitch cannot be doubled up. A large
+    // grid can legitimately take >5 minutes, past undici's default headersTimeout,
+    // so use a dedicated dispatcher with generous limits.
+    const dispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000 });
     for (const url of this.orderedUrls()) {
       try {
-        const response = await fetch(new URL('panorama/stitch', url), {
+        const response = await undiciFetch(new URL('panorama/stitch', url), {
           method: 'POST',
-          body: formData,
-          signal: AbortSignal.timeout(240_000),
+          // node's global FormData IS undici's class; only the DOM typings differ
+          body: formData as unknown as import('undici').FormData,
+          dispatcher,
+          signal: AbortSignal.timeout(840_000),
         });
         if (response.ok) {
           this.setHealthy(url, true);
