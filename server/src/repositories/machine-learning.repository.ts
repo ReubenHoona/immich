@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { Duration } from 'luxon';
 import { openAsBlob } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent } from 'undici';
 import { MachineLearningConfig } from 'src/config';
 import { CLIPConfig } from 'src/dtos/model-config.dto';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -309,13 +309,14 @@ export class MachineLearningRepository {
     const dispatcher = new Agent({ headersTimeout: 900_000, bodyTimeout: 900_000 });
     for (const url of this.orderedUrls()) {
       try {
-        const response = await undiciFetch(new URL('panorama/stitch', url), {
+        // native fetch serializes the global FormData correctly; it also honors the
+        // (undici) dispatcher init option even though the DOM typings omit it
+        const response = await fetch(new URL('panorama/stitch', url), {
           method: 'POST',
-          // node's global FormData IS undici's class; only the DOM typings differ
-          body: formData as unknown as import('undici').FormData,
+          body: formData,
           dispatcher,
           signal: AbortSignal.timeout(840_000),
-        });
+        } as RequestInit & { dispatcher: Agent });
         if (response.ok) {
           this.setHealthy(url, true);
           return {
