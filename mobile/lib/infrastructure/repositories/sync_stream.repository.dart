@@ -262,7 +262,10 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
             width: Value(asset.width),
             height: Value(asset.height),
             isEdited: Value(asset.isEdited),
-            isOffline: Value(asset.isOffline),
+            // isOffline is optional on SyncAssetV2 and only projected by the owner (asset) sync
+            // channel — partner/album channels omit it. Use Value.absent() on absence so those
+            // channels never clobber a true offline flag set by the owner channel.
+            isOffline: asset.isOffline.isPresent ? Value(asset.isOffline.value ?? false) : const Value.absent(),
           );
 
           batch.insert(
