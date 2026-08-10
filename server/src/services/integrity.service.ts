@@ -68,7 +68,7 @@ export class IntegrityService extends BaseService {
   @OnEvent({ name: 'ConfigInit', workers: [ImmichWorker.Microservices] })
   async onConfigInit({
     newConfig: {
-      integrityChecks: { untrackedFiles, missingFiles, checksumFiles },
+      integrityChecks: { untrackedFiles, missingFiles, checksumFiles, notifications },
     },
   }: ArgOf<'ConfigInit'>) {
     this.integrityLock = await this.databaseRepository.tryLock(DatabaseLock.IntegrityCheck);
@@ -105,12 +105,20 @@ export class IntegrityService extends BaseService {
         handlePromiseError(this.jobRepository.queue({ name: JobName.IntegrityChecksumFiles, data: {} }), this.logger),
       start: checksumFiles.enabled,
     });
+
+    this.cronRepository.create({
+      name: 'integrityNotifications',
+      expression: notifications.cronExpression,
+      onTick: () =>
+        handlePromiseError(this.jobRepository.queue({ name: JobName.IntegrityNotify, data: {} }), this.logger),
+      start: notifications.enabled,
+    });
   }
 
   @OnEvent({ name: 'ConfigUpdate', server: true })
   onConfigUpdate({
     newConfig: {
-      integrityChecks: { untrackedFiles, missingFiles, checksumFiles },
+      integrityChecks: { untrackedFiles, missingFiles, checksumFiles, notifications },
     },
   }: ArgOf<'ConfigUpdate'>) {
     if (!this.integrityLock) {
@@ -133,6 +141,12 @@ export class IntegrityService extends BaseService {
       name: 'integrityChecksumFiles',
       expression: checksumFiles.cronExpression,
       start: checksumFiles.enabled,
+    });
+
+    this.cronRepository.update({
+      name: 'integrityNotifications',
+      expression: notifications.cronExpression,
+      start: notifications.enabled,
     });
   }
 
@@ -415,6 +429,26 @@ export class IntegrityService extends BaseService {
       );
     }
 
+    // Extend the isOffline lifecycle from library assets to upload assets. Only ORIGINAL-file
+    // misses flip an asset offline (those carry assetId); a missing derivative carries
+    // fileAssetId and is a thumbnail issue, not an offline asset. The repository guards
+    // libraryId IS NULL (external-library offline semantics stay owned by the library scan)
+    // and only writes rows that actually change state, so repeated scans cause no sync churn.
+    const nowOfflineAssetIds = missingFiles.filter(({ assetId }) => assetId).map(({ assetId }) => assetId!);
+    await this.assetRepository.setUploadAssetsOffline(nowOfflineAssetIds, true);
+
+    // An original whose file has returned (it exists again and still has an open report) is
+    // brought back online in the same pass, mirroring the library scan's clear-on-return.
+    const backOnlineAssetIds = results
+      .filter(({ exists, reportId, assetId }) => exists && reportId && assetId)
+      .map(({ assetId }) => assetId!);
+    await this.assetRepository.setUploadAssetsOffline(backOnlineAssetIds, false);
+
+    this.logger.debugFn(
+      () =>
+        `Missing-file scan offline lifecycle: flagged ${nowOfflineAssetIds.length} upload asset(s) offline, cleared ${backOnlineAssetIds.length} back online`,
+    );
+
     this.logger.log(`Processed ${items.length} and found ${missingFiles.length} missing file(s).`);
     return JobStatus.Success;
   }
@@ -437,7 +471,15 @@ export class IntegrityService extends BaseService {
     const reportIds = results.filter(Boolean) as string[];
 
     if (reportIds.length > 0) {
+      // clear the offline flag for upload assets whose original file has returned, reading the
+      // assetIds off the reports before those rows are removed (mirrors handleMissingFiles)
+      const returnedAssetIds = await this.integrityRepository.getAssetIdsByReportIds(reportIds);
+      await this.assetRepository.setUploadAssetsOffline(returnedAssetIds, false);
       await this.integrityRepository.deleteByIds(reportIds);
+
+      this.logger.debugFn(
+        () => `Missing-file refresh cleared ${returnedAssetIds.length} upload asset(s) back online`,
+      );
     }
 
     this.logger.log(`Processed ${paths.length} paths and found ${reportIds.length} report(s) out of date.`);
@@ -704,4 +746,5 @@ export class IntegrityService extends BaseService {
     this.logger.log(`Deleted ${reports.length} reports.`);
     return JobStatus.Success;
   }
+
 }

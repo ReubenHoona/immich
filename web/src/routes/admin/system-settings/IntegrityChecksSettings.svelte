@@ -160,6 +160,67 @@
           </div>
         </SettingAccordion>
 
+        <SettingAccordion
+          key="integrity-checks-notifications"
+          title={$t('admin.integrity_checks_notifications')}
+          subtitle={$t('admin.integrity_checks_notifications_description')}
+        >
+          <div class="ms-4 mt-4 flex flex-col gap-4">
+            <SettingSwitch
+              title={$t('admin.integrity_checks_notifications_enable_description')}
+              {disabled}
+              bind:checked={configToEdit.integrityChecks.notifications.enabled}
+            />
+
+            <SettingInputField
+              inputType={SettingInputFieldType.TEXT}
+              label={$t('admin.cron_expression')}
+              bind:value={configToEdit.integrityChecks.notifications.cronExpression}
+              required={true}
+              {disabled}
+              isEdited={configToEdit.integrityChecks.notifications.cronExpression !==
+                config.integrityChecks.notifications.cronExpression}
+            >
+              {#snippet descriptionSnippet()}
+                <p class="text-sm dark:text-immich-dark-fg">
+                  <FormatMessage key="admin.cron_expression_description">
+                    {#snippet children({ message })}
+                      <Link
+                        href="https://crontab.guru/#{configToEdit.backup.database.cronExpression.replaceAll(' ', '_')}"
+                      >
+                        {message}
+                        <br />
+                      </Link>
+                    {/snippet}
+                  </FormatMessage>
+                </p>
+              {/snippet}
+            </SettingInputField>
+          </div>
+        </SettingAccordion>
+
+        <SettingAccordion
+          key="integrity-checks-upload-verification"
+          title={$t('admin.integrity_checks_upload_verification')}
+          subtitle={$t('admin.integrity_checks_upload_verification_description')}
+        >
+          <div class="ms-4 mt-4 flex flex-col gap-4">
+            <SettingSwitch
+              title={$t('admin.integrity_checks_upload_verification_size')}
+              subtitle={$t('admin.integrity_checks_upload_verification_size_description')}
+              {disabled}
+              bind:checked={configToEdit.integrityChecks.uploadVerification.size}
+            />
+
+            <SettingSwitch
+              title={$t('admin.integrity_checks_upload_verification_rehash')}
+              subtitle={$t('admin.integrity_checks_upload_verification_rehash_description')}
+              {disabled}
+              bind:checked={configToEdit.integrityChecks.uploadVerification.rehash}
+            />
+          </div>
+        </SettingAccordion>
+
         <SettingButtonsRow bind:configToEdit keys={['integrityChecks']} {disabled} />
       </div>
     </form>

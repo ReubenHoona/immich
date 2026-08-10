@@ -3,6 +3,7 @@
   import { IconButton, Stack, Text } from '@immich/ui';
   import {
     mdiBackupRestore,
+    mdiFileAlertOutline,
     mdiImageAlbum,
     mdiImagePlus,
     mdiInformationOutline,
@@ -65,6 +66,9 @@
       }
       case NotificationType.SystemMessage: {
         return mdiMessageBadgeOutline;
+      }
+      case NotificationType.IntegrityIssues: {
+        return mdiFileAlertOutline;
       }
       case NotificationType.Custom: {
         return mdiInformationOutline;

@@ -17,6 +17,18 @@ from
 group by
   "type"
 
+-- IntegrityRepository.getNewFindingCounts
+select
+  "type",
+  count(*) as "count",
+  max("createdAt")::text as "latest"
+from
+  "integrity_report"
+where
+  "createdAt" > $1::timestamptz
+group by
+  "type"
+
 -- IntegrityRepository.getIntegrityReport
 select
   "id",
@@ -167,6 +179,21 @@ from
   "integrity_report"
 where
   "abcdefghi" is not null
+
+-- IntegrityRepository.getAssetIdsByReportIds
+select
+  "assetId"
+from
+  "integrity_report"
+where
+  "id" in ($1)
+  and "assetId" is not null
+
+-- IntegrityRepository.deleteMissingFileReportsForAsset
+delete from "integrity_report"
+where
+  "type" = $1
+  and "assetId" = $2
 
 -- IntegrityRepository.deleteById
 delete from "integrity_report"

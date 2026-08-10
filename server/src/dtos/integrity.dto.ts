@@ -24,6 +24,7 @@ const IntegrityReportResponseItemSchema = z.object({
   id: z.uuidv4().describe('Integrity report item id'),
   type: IntegrityReportSchema,
   path: z.string().describe('Integrity report item path'),
+  assetId: z.uuidv4().nullable().describe('Linked asset id, if the item refers to an asset'),
 });
 
 const IntegrityReportResponseSchema = z

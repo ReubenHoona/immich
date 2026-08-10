@@ -636,6 +636,28 @@ export class AssetRepository {
     await this.db.updateTable('asset').set(options).where('libraryId', '=', asUuid(libraryId)).execute();
   }
 
+  /**
+   * Flip the offline flag for UPLOAD assets (libraryId IS NULL) only, so the integrity
+   * missing-files scan can extend the isOffline lifecycle to uploads without disturbing the
+   * external-library offline semantics owned by the library scan. The `isOffline = !isOffline`
+   * guard means only rows that actually change state are written — repeated scans of a stable
+   * library cause no updatedAt churn (and therefore no sync churn).
+   */
+  @GenerateSql({ params: [[DummyValue.UUID], true] })
+  @Chunked()
+  async setUploadAssetsOffline(ids: string[], isOffline: boolean): Promise<void> {
+    if (ids.length === 0) {
+      return;
+    }
+    await this.db
+      .updateTable('asset')
+      .set({ isOffline })
+      .where('id', '=', anyUuid(ids))
+      .where('libraryId', 'is', null)
+      .where('isOffline', '=', !isOffline)
+      .execute();
+  }
+
   async update(asset: Updateable<AssetTable> & { id: string }) {
     const value = omitBy(asset, isUndefined);
     delete value.id;

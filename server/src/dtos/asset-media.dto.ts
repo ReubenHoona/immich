@@ -63,6 +63,13 @@ const AssetMediaCreateSchema = AssetMediaBaseSchema.extend({
     .meta({ type: 'string', format: 'binary' }),
 }).meta({ id: 'AssetMediaCreateDto' });
 
+const AssetMediaRestoreSchema = z
+  .object({
+    /** Only the file is needed; all other properties are taken from the existing asset row. */
+    [UploadFieldName.ASSET_DATA]: z.any().describe('Asset file data').meta({ type: 'string', format: 'binary' }),
+  })
+  .meta({ id: 'AssetMediaRestoreDto' });
+
 const AssetBulkUploadCheckItemSchema = z
   .object({
     id: z.string().describe('Client-side identifier echoed in the response to match results to inputs (e.g. filename)'),
@@ -78,4 +85,5 @@ const AssetBulkUploadCheckSchema = z
 
 export class AssetMediaOptionsDto extends createZodDto(AssetMediaOptionsSchema) {}
 export class AssetMediaCreateDto extends createZodDto(AssetMediaCreateSchema) {}
+export class AssetMediaRestoreDto extends createZodDto(AssetMediaRestoreSchema) {}
 export class AssetBulkUploadCheckDto extends createZodDto(AssetBulkUploadCheckSchema) {}

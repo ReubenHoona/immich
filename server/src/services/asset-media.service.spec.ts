@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   InternalServerErrorException,
   NotFoundException,
   UnauthorizedException,
@@ -9,7 +10,7 @@ import { AssetMediaStatus, AssetRejectReason, AssetUploadAction } from 'src/dtos
 import { AssetMediaCreateDto, AssetMediaSize, UploadFieldName } from 'src/dtos/asset-media.dto';
 import { MapAsset } from 'src/dtos/asset-response.dto';
 import { AssetEditAction } from 'src/dtos/editing.dto';
-import { AssetFileType, AssetType, AssetVisibility, CacheControl, JobName } from 'src/enum';
+import { AssetFileType, AssetType, AssetVisibility, CacheControl, ChecksumAlgorithm, JobName } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
 import { AssetMediaService } from 'src/services/asset-media.service';
 import { UploadBody } from 'src/types';
@@ -463,6 +464,115 @@ describe(AssetMediaService.name, () => {
         new Date(createDto.fileModifiedAt),
       );
       expect(mocks.asset.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('restoreAssetOriginal', () => {
+    const restoreFile = {
+      uuid: 'restore-uuid',
+      originalPath: '/data/upload/user_id_1/re/store/restore-uuid.jpeg',
+      checksum: Buffer.from('file hash', 'utf8'),
+      originalName: 'asset_1.jpeg',
+      size: 42,
+    };
+
+    const offlineAsset = {
+      id: 'asset-1',
+      ownerId: authStub.user1.user.id,
+      libraryId: null,
+      checksumAlgorithm: ChecksumAlgorithm.sha1File,
+      checksum: Buffer.from('file hash', 'utf8'),
+      originalPath: 'fake_path/asset_1.jpeg',
+      fileModifiedAt: new Date('2022-06-19T23:41:36.910Z'),
+      isOffline: true,
+      deletedAt: null,
+    } as any;
+
+    beforeEach(() => {
+      mocks.access.asset.checkOwnerAccess.mockResolvedValue(new Set(['asset-1']));
+    });
+
+    it('should restore the missing original in place, clear offline, drop the report and requeue thumbnails', async () => {
+      mocks.asset.getById.mockResolvedValue(offlineAsset);
+      // false pre-move (eligibility: original is missing), true post-move (moveFile placed the bytes)
+      mocks.storage.checkFileExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      mocks.move.create.mockResolvedValue({
+        id: 'move-1',
+        oldPath: restoreFile.originalPath,
+        newPath: offlineAsset.originalPath,
+      } as any);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).resolves.toEqual({
+        id: 'asset-1',
+        status: AssetMediaStatus.RESTORED,
+      });
+
+      expect(mocks.storage.rename).toHaveBeenCalledWith(restoreFile.originalPath, offlineAsset.originalPath);
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: 'asset-1', isOffline: false });
+      expect(mocks.integrityReport.deleteMissingFileReportsForAsset).toHaveBeenCalledWith('asset-1');
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.AssetGenerateThumbnails,
+        data: { id: 'asset-1', source: 'upload', correlationId: undefined },
+      });
+    });
+
+    it('should reject a checksum mismatch with 400 and never touch the asset row', async () => {
+      mocks.asset.getById.mockResolvedValue({ ...offlineAsset, checksum: Buffer.from('other hash', 'utf8') });
+      mocks.storage.checkFileExists.mockResolvedValue(false);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.move.create).not.toHaveBeenCalled();
+      expect(mocks.storage.rename).not.toHaveBeenCalled();
+      expect(mocks.asset.update).not.toHaveBeenCalled();
+      // the rejected temp upload is discarded, the asset's own file is left untouched
+      expect(mocks.job.queue).toHaveBeenCalledWith({
+        name: JobName.FileDelete,
+        data: { files: [restoreFile.originalPath] },
+      });
+    });
+
+    it('should refuse to overwrite a present file with 409', async () => {
+      mocks.asset.getById.mockResolvedValue(offlineAsset);
+      mocks.storage.checkFileExists.mockResolvedValue(true);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        ConflictException,
+      );
+
+      expect(mocks.move.create).not.toHaveBeenCalled();
+      expect(mocks.asset.update).not.toHaveBeenCalled();
+    });
+
+    it('should reject when the asset is not offline (guardrail against resurrecting deletes)', async () => {
+      mocks.asset.getById.mockResolvedValue({ ...offlineAsset, isOffline: false });
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.storage.checkFileExists).not.toHaveBeenCalled();
+      expect(mocks.move.create).not.toHaveBeenCalled();
+    });
+
+    it('should reject a library asset in place', async () => {
+      mocks.asset.getById.mockResolvedValue({ ...offlineAsset, libraryId: 'library-1' });
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+
+      expect(mocks.move.create).not.toHaveBeenCalled();
+    });
+
+    it('should 404 when the asset does not exist', async () => {
+      mocks.asset.getById.mockResolvedValue(void 0);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 

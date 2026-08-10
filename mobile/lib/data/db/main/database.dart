@@ -161,7 +161,7 @@ class Drift extends $Drift {
   }
 
   @override
-  int get schemaVersion => 31;
+  int get schemaVersion => 32;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -358,6 +358,11 @@ class Drift extends $Drift {
               },
               from30To31: (m, v31) async {
                 await m.createIndex(v31.idxRemoteAssetUploaded);
+              },
+              from31To32: (m, v32) async {
+                // Mirror of the server's asset.isOffline flag; enables heal-in-place restore of
+                // file-missing uploaded assets (see DriftBackupRepository.getCandidates).
+                await m.addColumn(v32.remoteAssetEntity, v32.remoteAssetEntity.isOffline);
               },
             ),
           ),

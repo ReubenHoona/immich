@@ -4,6 +4,7 @@ import z from 'zod';
 export enum AssetMediaStatus {
   CREATED = 'created',
   DUPLICATE = 'duplicate',
+  RESTORED = 'restored',
 }
 
 const AssetMediaStatusSchema = z.enum(AssetMediaStatus).describe('Upload status').meta({ id: 'AssetMediaStatus' });

@@ -51,6 +51,35 @@ export class IntegrityRepository {
     ) as Record<IntegrityReport, number>;
   }
 
+  @GenerateSql({ params: [DummyValue.STRING] })
+  async getNewFindingCounts(since?: string) {
+    // the watermark is kept as postgres' own text rendering of the timestamp so no
+    // precision is lost round-tripping it (JS Date only holds milliseconds; the column
+    // has microseconds — a truncated watermark re-matches already-announced rows forever)
+    const rows = await this.db
+      .selectFrom('integrity_report')
+      .select(['type', this.db.fn.countAll<number>().as('count'), sql<string>`max("createdAt")::text`.as('latest')])
+      .$if(since !== undefined, (eb) => eb.where('createdAt', '>', sql<Date>`${since!}::timestamptz`))
+      .groupBy('type')
+      .execute();
+
+    const counts = Object.fromEntries(
+      Object.values(IntegrityReport).map((type) => [type, Number(rows.find((row) => row.type === type)?.count || 0)]),
+    ) as Record<IntegrityReport, number>;
+
+    const latest = rows
+      .map((row) => row.latest)
+      .filter((value): value is string => value !== null)
+      .sort()
+      .at(-1);
+
+    return {
+      counts,
+      total: rows.reduce((sum, row) => sum + Number(row.count), 0),
+      latest: latest ?? null,
+    };
+  }
+
   @GenerateSql({ params: [{ cursor: DummyValue.NUMBER, limit: 100 }, DummyValue.STRING] })
   async getIntegrityReport(pagination: ReportPaginationOptions, type: IntegrityReport) {
     const items = await this.db
@@ -213,6 +242,31 @@ export class IntegrityRepository {
       .$if(property === undefined, (eb) => eb.where('assetId', 'is', null).where('fileAssetId', 'is', null))
       .$if(property !== undefined, (eb) => eb.where(property!, 'is not', null))
       .stream();
+  }
+
+  @GenerateSql({ params: [[DummyValue.UUID]] })
+  async getAssetIdsByReportIds(ids: string[]): Promise<string[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const rows = await this.db
+      .selectFrom('integrity_report')
+      .select('assetId')
+      .where('id', 'in', ids)
+      .where('assetId', 'is not', null)
+      .execute();
+
+    return rows.map((row) => row.assetId).filter((assetId): assetId is string => assetId !== null);
+  }
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  deleteMissingFileReportsForAsset(assetId: string) {
+    return this.db
+      .deleteFrom('integrity_report')
+      .where('type', '=', IntegrityReport.MissingFile)
+      .where('assetId', '=', assetId)
+      .execute();
   }
 
   @GenerateSql({ params: [DummyValue.STRING] })

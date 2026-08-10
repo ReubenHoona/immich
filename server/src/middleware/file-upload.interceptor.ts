@@ -1,4 +1,11 @@
-import { BadRequestException, CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import {
+  BadRequestException,
+  CallHandler,
+  ExecutionContext,
+  Injectable,
+  InternalServerErrorException,
+  NestInterceptor,
+} from '@nestjs/common';
 import { PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import { transformException } from '@nestjs/platform-express/multer/multer/multer.utils';
@@ -6,7 +13,8 @@ import { NextFunction, RequestHandler } from 'express';
 import multer from 'multer';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { pipeline } from 'node:stream';
+import { pipeline, Writable } from 'node:stream';
+import { pipeline as pipelineAsync } from 'node:stream/promises';
 import { Observable } from 'rxjs';
 import { UploadFieldName } from 'src/dtos/asset-media.dto';
 import { RouteKey } from 'src/enum';
@@ -132,14 +140,47 @@ export class FileUploadInterceptor implements NestInterceptor {
         if (size === 0) {
           return callback(new BadRequestException('File is empty'));
         }
-        callback(null, {
-          path,
-          size,
-          checksum: hash?.digest(),
-        });
+        const checksum = hash?.digest();
+        this.verifyWrittenFile(path, size, checksum)
+          .then(() => callback(null, { path, size, checksum }))
+          .catch((error: Error) => callback(error));
       });
     } catch (error: Error | any) {
       callback(error);
+    }
+  }
+
+  /**
+   * Confirm the bytes we just acknowledged from the client actually reached the disk.
+   * A failure here fails the whole upload request, so the client keeps the file queued
+   * and retries — instead of the server holding a record for a file that never landed.
+   */
+  private async verifyWrittenFile(path: string, expectedSize: number, checksum?: Buffer) {
+    const { size: verifySize, rehash } = await this.assetService.getUploadVerificationConfig();
+
+    if (verifySize || rehash) {
+      const stat = await this.storageRepository.stat(path);
+      if (stat.size !== expectedSize) {
+        throw new InternalServerErrorException(
+          `Upload verification failed: received ${expectedSize} bytes but found ${stat.size} on disk for ${path}`,
+        );
+      }
+    }
+
+    if (rehash && checksum) {
+      const diskHash = createHash('sha1');
+      await pipelineAsync(
+        this.storageRepository.createPlainReadStream(path),
+        new Writable({
+          write(chunk, _encoding, done) {
+            diskHash.update(chunk);
+            done();
+          },
+        }),
+      );
+      if (!diskHash.digest().equals(checksum)) {
+        throw new InternalServerErrorException(`Upload verification failed: on-disk checksum mismatch for ${path}`);
+      }
     }
   }
 

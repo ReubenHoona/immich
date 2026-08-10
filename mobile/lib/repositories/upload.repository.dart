@@ -96,13 +96,24 @@ class UploadRepository {
     void Function(int bytes, int totalBytes)? onProgress,
     required String logContext,
     Client? httpClient,
+    String? restoreAssetId,
   }) async {
     final String savedEndpoint = Store.get(StoreKey.serverEndpoint);
+    // Heal-in-place: when the asset already exists on the server but its original file is missing
+    // (offline), re-supply the verified bytes to PUT /assets/:id/original instead of minting a new
+    // asset via POST /assets. The server verifies the checksum matches the stored one and clears
+    // the offline flag; a 200 {status: 'restored'} response carries the same asset id.
+    if (restoreAssetId != null) {
+      logger.info("Re-supplying missing original for offline asset $restoreAssetId "
+          "via PUT /assets/$restoreAssetId/original (heal-in-place, same asset id)");
+    }
 
     ProgressMultipartRequest buildRequest() {
       final request = ProgressMultipartRequest(
-        'POST',
-        Uri.parse('$savedEndpoint/assets'),
+        restoreAssetId != null ? 'PUT' : 'POST',
+        restoreAssetId != null
+            ? Uri.parse('$savedEndpoint/assets/$restoreAssetId/original')
+            : Uri.parse('$savedEndpoint/assets'),
         abortTrigger: cancelToken?.future,
         onProgress: onProgress,
       );

@@ -96,6 +96,14 @@ const updatedConfig = Object.freeze<SystemConfig>({
       timeLimit: 60 * 60 * 1000,
       percentageLimit: 1,
     },
+    notifications: {
+      enabled: true,
+      cronExpression: '0 5 * * *',
+    },
+    uploadVerification: {
+      size: true,
+      rehash: false,
+    },
   },
   logging: {
     enabled: true,

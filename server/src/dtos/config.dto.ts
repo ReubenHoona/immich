@@ -176,6 +176,20 @@ const AdminConfigSchemaWithVisibility = z
         })
           .describe('Integrity checksum job config')
           .meta({ id: 'AdminConfigIntegrityChecksumJobDto' }),
+        notifications: z
+          .object({
+            enabled: configBool.describe('Enabled'),
+            cronExpression: cronExpressionSchema.describe('Cron expression for when integrity findings are announced'),
+          })
+          .describe('Integrity notifications config')
+          .meta({ id: 'AdminConfigIntegrityNotificationsDto' }),
+        uploadVerification: z
+          .object({
+            size: configBool.describe('Verify the on-disk size of every upload before acknowledging it'),
+            rehash: configBool.describe('Re-read and re-hash every upload from disk before acknowledging it'),
+          })
+          .describe('Upload verification config')
+          .meta({ id: 'AdminConfigIntegrityUploadVerificationDto' }),
       })
       .describe('Integrity checks config')
       .meta({ id: 'AdminConfigIntegrityChecksDto' }),
@@ -593,6 +607,15 @@ export const defaults = Object.freeze<SystemConfig>({
       cronExpression: CronExpression.EVERY_DAY_AT_3AM,
       timeLimit: 60 * 60 * 1000, // 1 hour
       percentageLimit: 1, // 100% of assets
+    },
+    notifications: {
+      enabled: true,
+      // after the 3 AM integrity scans, so each night's findings go out the same morning
+      cronExpression: CronExpression.EVERY_DAY_AT_5AM,
+    },
+    uploadVerification: {
+      size: true,
+      rehash: false,
     },
   },
   job: {

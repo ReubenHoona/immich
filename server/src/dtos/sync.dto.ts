@@ -97,6 +97,7 @@ const SyncAssetV2Schema = z
     type: AssetTypeSchema,
     deletedAt: isoDatetimeToDate.nullable().describe('Deleted at'),
     isFavorite: z.boolean().describe('Is favorite'),
+    isOffline: z.boolean().nullable().optional().describe('Whether the original file is currently missing on the server'),
     visibility: AssetVisibilitySchema,
     livePhotoVideoId: z.string().nullable().describe('Live photo video ID'),
     stackId: z.string().nullable().describe('Stack ID'),
@@ -123,7 +124,9 @@ export class SyncAssetV1 extends createZodDto(SyncAssetV1Schema) {}
 export class SyncAssetV2 extends createZodDto(SyncAssetV2Schema) {}
 
 const SyncAssetDeleteV1Schema = z
-  .object({ assetId: z.uuidv4().describe('Asset ID') })
+  .object({
+    assetId: z.uuidv4().describe('Asset ID'),
+  })
   .meta({ id: 'SyncAssetDeleteV1' });
 
 const SyncAssetExifV1Schema = z

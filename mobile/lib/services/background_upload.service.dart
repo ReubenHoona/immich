@@ -155,7 +155,8 @@ class BackgroundUploadService {
     final List<UploadTask> tasks = [];
 
     for (final asset in batch) {
-      final task = await getUploadTask(asset);
+      // getCandidates threads the offline server asset id onto restore candidates as remoteId.
+      final task = await getUploadTask(asset, restoreAssetId: asset.remoteId);
       if (task != null) {
         tasks.add(task);
       }
@@ -239,12 +240,22 @@ class BackgroundUploadService {
   }
 
   @visibleForTesting
-  Future<UploadTask?> getUploadTask(LocalAsset asset, {String group = kBackupGroup, int? priority}) async {
+  Future<UploadTask?> getUploadTask(
+    LocalAsset asset, {
+    String group = kBackupGroup,
+    int? priority,
+    String? restoreAssetId,
+  }) async {
     final entity = await _storageRepository.getAssetEntityForAsset(asset);
     if (entity == null) {
       _logger.warning("Asset entity not found for ${asset.id} - ${asset.name}");
       return null;
     }
+
+    // A restore re-supplies a single existing asset's original via PUT /assets/:id/original, so the
+    // two-file live photo dance (upload motion first, then still) does not apply: always send the
+    // original still and never mark it hidden or enqueue a follow-up photo task.
+    final bool isLivePhoto = entity.isLivePhoto && restoreAssetId == null;
 
     File? file;
 
@@ -258,7 +269,7 @@ class BackgroundUploadService {
     /// The cancel operation will only cancel the video group (normal group), the photo group will not
     /// be touched, as the video file is already uploaded.
 
-    if (entity.isLivePhoto) {
+    if (isLivePhoto) {
       file = await _storageRepository.getMotionFileForAsset(asset);
     } else {
       file = await _storageRepository.getFileForAsset(asset.id);
@@ -276,7 +287,7 @@ class BackgroundUploadService {
 
     final String metadata = UploadTaskMetadata(
       localAssetId: asset.id,
-      isLivePhotos: entity.isLivePhoto,
+      isLivePhotos: isLivePhoto,
       livePhotoVideoId: '',
     ).toJson();
 
@@ -294,11 +305,12 @@ class BackgroundUploadService {
       isFavorite: asset.isFavorite,
       requiresWiFi: requiresWiFi,
       // Visibility hidden on upload to prevent the server from running regular jobs on the live photo asset
-      fields: entity.isLivePhoto ? {'visibility': api.AssetVisibility.hidden.toString()} : null,
-      cloudId: entity.isLivePhoto ? null : asset.cloudId,
-      adjustmentTime: entity.isLivePhoto ? null : asset.adjustmentTime?.toIso8601String(),
-      latitude: entity.isLivePhoto ? null : asset.latitude?.toString(),
-      longitude: entity.isLivePhoto ? null : asset.longitude?.toString(),
+      fields: isLivePhoto ? {'visibility': api.AssetVisibility.hidden.toString()} : null,
+      cloudId: isLivePhoto ? null : asset.cloudId,
+      adjustmentTime: isLivePhoto ? null : asset.adjustmentTime?.toIso8601String(),
+      latitude: isLivePhoto ? null : asset.latitude?.toString(),
+      longitude: isLivePhoto ? null : asset.longitude?.toString(),
+      restoreAssetId: restoreAssetId,
     );
   }
 
@@ -364,9 +376,14 @@ class BackgroundUploadService {
     String? adjustmentTime,
     String? latitude,
     String? longitude,
+    String? restoreAssetId,
   }) async {
     final serverEndpoint = Store.get(StoreKey.serverEndpoint);
-    final url = Uri.parse('$serverEndpoint/assets').toString();
+    // Heal-in-place restore targets the existing asset (PUT /assets/:id/original) rather than
+    // creating a new one (POST /assets); the server verifies the bytes match the stored checksum.
+    final url = restoreAssetId != null
+        ? Uri.parse('$serverEndpoint/assets/$restoreAssetId/original').toString()
+        : Uri.parse('$serverEndpoint/assets').toString();
     final headers = ApiService.getRequestHeaders();
     final deviceId = Store.get(StoreKey.deviceId);
     final (baseDirectory, directory, filename) = await Task.split(filePath: file.path);
@@ -398,7 +415,7 @@ class BackgroundUploadService {
     return UploadTask(
       taskId: deviceAssetId,
       displayName: originalFileName ?? filename,
-      httpRequestMethod: 'POST',
+      httpRequestMethod: restoreAssetId != null ? 'PUT' : 'POST',
       url: url,
       headers: headers,
       filename: filename,

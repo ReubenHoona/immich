@@ -1,4 +1,10 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import sanitize from 'sanitize-filename';
 import { StorageCore } from 'src/cores/storage.core';
 import { Asset, AuthSharedLink } from 'src/database';
@@ -20,6 +26,7 @@ import { AssetDownloadOriginalDto } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
   AssetFileType,
+  AssetPathType,
   AssetVisibility,
   CacheControl,
   ChecksumAlgorithm,
@@ -112,6 +119,11 @@ export class AssetMediaService extends BaseService {
     this.storageRepository.mkdirSync(folder);
 
     return folder;
+  }
+
+  async getUploadVerificationConfig() {
+    const { integrityChecks } = await this.getConfig({ withCache: true });
+    return integrityChecks.uploadVerification;
   }
 
   async onUploadError(request: AuthRequest, file: Express.Multer.File) {
@@ -222,6 +234,101 @@ export class AssetMediaService extends BaseService {
       }
 
       this.logger.error(`Error uploading file ${error}`, error?.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * In-place, checksum-verified restore of an upload asset whose original file went missing.
+   * Unlike delete+re-upload, the asset row is never touched destructively: the id and every
+   * FK-attached record (faces, tags, albums, memories, OCR, edits, embeddings, …) survive by
+   * construction — no delete, no cascade. Bytes are accepted ONLY when they hash to the checksum
+   * the server already recorded, and ONLY when the asset is genuinely offline with its file
+   * missing, so content can never be swapped and an intentionally-deleted asset can never be
+   * resurrected (the #23897 guardrail).
+   */
+  async restoreAssetOriginal(auth: AuthDto, id: string, file: UploadFile): Promise<AssetMediaResponseDto> {
+    const correlationId = this.logger.getCorrelationId();
+    const restoreStartedAt = Date.now();
+    try {
+      await this.requireAccess({ auth, permission: Permission.AssetUpdate, ids: [id] });
+
+      const asset = await this.assetRepository.getById(id);
+      if (!asset) {
+        throw new NotFoundException('Asset not found');
+      }
+
+      this.logger.debugFn(
+        () =>
+          `Restore requested for asset ${id} (offline: ${asset.isOffline}, libraryId: ${asset.libraryId}, checksumAlgorithm: ${asset.checksumAlgorithm})`,
+      );
+
+      // eligibility: an uploaded asset (libraryId IS NULL) with a file checksum
+      if (asset.libraryId !== null) {
+        throw new BadRequestException('Only uploaded assets can be restored in place');
+      }
+      if (asset.checksumAlgorithm !== ChecksumAlgorithm.sha1File) {
+        throw new BadRequestException('Asset checksum is not a file checksum; cannot restore in place');
+      }
+      // the #23897 guardrail: re-supply is gated on offline (asset exists, file missing) and never
+      // on a bare checksum match — deleted/trashed assets are never scanned, so never offline
+      if (!asset.isOffline || asset.deletedAt !== null) {
+        throw new BadRequestException('Asset is not offline; only a missing original can be restored');
+      }
+
+      // never overwrite a file that is present
+      if (await this.storageRepository.checkFileExists(asset.originalPath)) {
+        throw new ConflictException('Original file is already present; refusing to overwrite');
+      }
+
+      // the invariant that makes this upstream-mergeable: the bytes must hash to the stored checksum
+      if (!file.checksum.equals(asset.checksum)) {
+        this.logger.warn(`Restore rejected for asset ${id}: supplied bytes do not match the recorded checksum`);
+        throw new BadRequestException('Checksum mismatch: supplied file does not match the asset');
+      }
+
+      this.logger.verboseFn(() => `Restore checksum verified for asset ${id}; moving bytes into place`);
+
+      // move the verified temp file onto the asset's EXISTING originalPath (no re-templating);
+      // StorageCore handles cross-device moves (EXDEV → copy + verify + delete) and crash recovery
+      await this.storageCore.moveFile({
+        entityId: asset.id,
+        pathType: AssetPathType.Original,
+        oldPath: file.originalPath,
+        newPath: asset.originalPath,
+        assetInfo: { sizeInBytes: file.size, checksum: asset.checksum },
+      });
+      // moveFile has branches that silently return without placing the file (verification failure,
+      // non-EXDEV rename error, size mismatch); assert the bytes actually landed before clearing state
+      if (!(await this.storageRepository.checkFileExists(asset.originalPath))) {
+        throw new InternalServerErrorException(`Restore failed: file was not placed at ${asset.originalPath}`);
+      }
+      // preserve mtime so the checksum scan's mtime bookkeeping stays consistent
+      await this.storageRepository.utimes(asset.originalPath, new Date(), new Date(asset.fileModifiedAt));
+
+      // clear the offline state and drop the open missing-file report; nothing else on the row changes
+      await this.assetRepository.update({ id: asset.id, isOffline: false });
+      await this.integrityRepository.deleteMissingFileReportsForAsset(asset.id);
+
+      this.logger.verboseFn(() => `Restore cleared offline state + integrity report for asset ${id}`);
+
+      // thumbnails were lost with the file — regenerate only those. A full metadata re-extraction
+      // is deliberately NOT forced: identical bytes make faces/exif a no-op, and getDates would
+      // otherwise recompute localDateTime/fileCreatedAt without consulting lockedProperties.
+      await this.jobRepository.queue({
+        name: JobName.AssetGenerateThumbnails,
+        data: { id: asset.id, source: 'upload', correlationId },
+      });
+
+      this.telemetryRepository.jobs.addToCounter('immich.restore.assets.restored', 1);
+      this.telemetryRepository.jobs.addToHistogram('immich.restore.duration_ms', Date.now() - restoreStartedAt);
+
+      this.logger.log(`Restored missing original for asset ${id} in place`);
+
+      return { id: asset.id, status: AssetMediaStatus.RESTORED };
+    } catch (error: any) {
+      // discard the temp upload; the asset row is never touched on failure
+      await this.jobRepository.queue({ name: JobName.FileDelete, data: { files: [file.originalPath] } });
       throw error;
     }
   }

@@ -64,6 +64,14 @@ void main() {
 
   List<Map<String, String>> captureFields() {
     final captured = <Map<String, String>>[];
+    Future<UploadResult> answer(Invocation invocation) async {
+      final fields = invocation.namedArguments[#fields] as Map<String, String>;
+      captured.add(Map.of(fields));
+      return UploadResult.success(remoteAssetId: 'remote-${captured.length}');
+    }
+
+    // Restore candidates add a restoreAssetId named arg; mocktail matches named args exactly, so
+    // stub both the plain-upload and restore-target call shapes.
     when(
       () => mockUploadRepository.uploadFile(
         file: any(named: 'file'),
@@ -73,16 +81,28 @@ void main() {
         onProgress: any(named: 'onProgress'),
         logContext: any(named: 'logContext'),
       ),
-    ).thenAnswer((invocation) async {
-      final fields = invocation.namedArguments[#fields] as Map<String, String>;
-      captured.add(Map.of(fields));
-      return UploadResult.success(remoteAssetId: 'remote-${captured.length}');
-    });
+    ).thenAnswer(answer);
+    when(
+      () => mockUploadRepository.uploadFile(
+        file: any(named: 'file'),
+        originalFileName: any(named: 'originalFileName'),
+        fields: any(named: 'fields'),
+        cancelToken: any(named: 'cancelToken'),
+        onProgress: any(named: 'onProgress'),
+        logContext: any(named: 'logContext'),
+        restoreAssetId: any(named: 'restoreAssetId'),
+      ),
+    ).thenAnswer(answer);
     return captured;
   }
 
   List<String> captureOriginalFileNames() {
     final captured = <String>[];
+    Future<UploadResult> answer(Invocation invocation) async {
+      captured.add(invocation.namedArguments[#originalFileName] as String);
+      return UploadResult.success(remoteAssetId: 'remote-${captured.length}');
+    }
+
     when(
       () => mockUploadRepository.uploadFile(
         file: any(named: 'file'),
@@ -92,10 +112,18 @@ void main() {
         onProgress: any(named: 'onProgress'),
         logContext: any(named: 'logContext'),
       ),
-    ).thenAnswer((invocation) async {
-      captured.add(invocation.namedArguments[#originalFileName] as String);
-      return UploadResult.success(remoteAssetId: 'remote-${captured.length}');
-    });
+    ).thenAnswer(answer);
+    when(
+      () => mockUploadRepository.uploadFile(
+        file: any(named: 'file'),
+        originalFileName: any(named: 'originalFileName'),
+        fields: any(named: 'fields'),
+        cancelToken: any(named: 'cancelToken'),
+        onProgress: any(named: 'onProgress'),
+        logContext: any(named: 'logContext'),
+        restoreAssetId: any(named: 'restoreAssetId'),
+      ),
+    ).thenAnswer(answer);
     return captured;
   }
 

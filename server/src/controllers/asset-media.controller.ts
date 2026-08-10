@@ -8,6 +8,7 @@ import {
   Param,
   ParseFilePipe,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -26,6 +27,7 @@ import {
   AssetBulkUploadCheckDto,
   AssetMediaCreateDto,
   AssetMediaOptionsDto,
+  AssetMediaRestoreDto,
   AssetMediaSize,
 } from 'src/dtos/asset-media.dto';
 import { AssetDownloadOriginalDto } from 'src/dtos/asset.dto';
@@ -87,6 +89,34 @@ export class AssetMediaController {
     }
 
     return responseDto;
+  }
+
+  @Put(':id/original')
+  @Authenticated({ permission: Permission.AssetUpload })
+  // FileUploadInterceptor ONLY — NOT AssetUploadInterceptor, whose x-immich-checksum short-circuit
+  // would answer DUPLICATE before the bytes arrive (the offline row still owns the checksum).
+  @UseInterceptors(FileUploadInterceptor)
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({ description: 'Asset restore data', type: AssetMediaRestoreDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Missing original restored in place',
+    type: AssetMediaResponseDto,
+  })
+  @HttpCode(HttpStatus.OK)
+  @Endpoint({
+    summary: 'Restore a missing original in place',
+    description:
+      'Restores the original file of an offline asset in place, accepting the bytes only when they hash to the checksum the server already recorded. The asset id and every attached record are preserved (no delete, no re-upload).',
+    history: new HistoryBuilder().added('v3.1.0').alpha('v3.1.0'),
+  })
+  async restoreAssetOriginal(
+    @Auth() auth: AuthDto,
+    @Param() { id }: UUIDParamDto,
+    @UploadedFiles(new ParseFilePipe({ validators: [new FileNotEmptyValidator(['assetData'])] })) files: UploadFiles,
+  ): Promise<AssetMediaResponseDto> {
+    const { file } = getFiles(files);
+    return this.service.restoreAssetOriginal(auth, id, file);
   }
 
   @Get(':id/original')

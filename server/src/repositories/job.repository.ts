@@ -1,7 +1,8 @@
 import { getQueueToken } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { ModuleRef, Reflector } from '@nestjs/core';
 import { JobsOptions, Queue, Worker } from 'bullmq';
+import { CLS_ID, ClsService } from 'nestjs-cls';
 import { setTimeout } from 'node:timers/promises';
 import { JobConfig } from 'src/decorators';
 import { QueueJobResponseDto, QueueJobSearchDto } from 'src/dtos/queue.dto';
@@ -33,6 +34,7 @@ export class JobRepository {
     private configRepository: ConfigRepository,
     private eventRepository: EventRepository,
     private logger: LoggingRepository,
+    @Inject(ClsService) private cls: ClsService | undefined,
   ) {
     this.logger.setContext(JobRepository.name);
   }
@@ -139,6 +141,18 @@ export class JobRepository {
     if (!item) {
       this.logger.warn(`Skipping unknown job: "${name}"`);
       return JobStatus.Skipped;
+    }
+
+    // Thread a journey/correlation id from the HTTP request that queued this job (if any) into
+    // a CLS context, so the `~<id>` log prefix follows the work across the queue boundary.
+    // No-op at prod defaults: jobs carry no correlationId unless a feature (e.g. in-place
+    // original restore) explicitly sets one.
+    const correlationId = (data as { correlationId?: string } | undefined)?.correlationId;
+    if (this.cls && correlationId) {
+      return this.cls.run(() => {
+        this.cls!.set(CLS_ID, correlationId);
+        return item.handler(data);
+      });
     }
 
     return item.handler(data);

@@ -4,6 +4,7 @@ import { createTransport } from 'nodemailer';
 import React from 'react';
 import { AlbumInviteEmail } from 'src/emails/album-invite.email';
 import { AlbumUpdateEmail } from 'src/emails/album-update.email';
+import { IntegrityIssuesEmail } from 'src/emails/integrity-issues.email';
 import { TestEmail } from 'src/emails/test.email';
 import { WelcomeEmail } from 'src/emails/welcome.email';
 import { LoggingRepository } from 'src/repositories/logging.repository';
@@ -39,6 +40,9 @@ export enum EmailTemplate {
   // ALBUM
   ALBUM_INVITE = 'album-invite',
   ALBUM_UPDATE = 'album-update',
+
+  // ADMIN
+  INTEGRITY_ISSUES = 'integrity-issues',
 }
 
 interface BaseEmailProps {
@@ -71,6 +75,12 @@ export interface AlbumUpdateEmailProps extends BaseEmailProps {
   cid?: string;
 }
 
+export interface IntegrityIssuesEmailProps extends BaseEmailProps {
+  displayName: string;
+  findings: string;
+  total: number;
+}
+
 export type EmailRenderRequest =
   | {
       template: EmailTemplate.TEST_EMAIL;
@@ -90,6 +100,11 @@ export type EmailRenderRequest =
   | {
       template: EmailTemplate.ALBUM_UPDATE;
       data: AlbumUpdateEmailProps;
+      customTemplate: string;
+    }
+  | {
+      template: EmailTemplate.INTEGRITY_ISSUES;
+      data: IntegrityIssuesEmailProps;
       customTemplate: string;
     };
 
@@ -153,6 +168,10 @@ export class EmailRepository {
 
       case EmailTemplate.ALBUM_UPDATE: {
         return React.createElement(AlbumUpdateEmail, { ...data, customTemplate });
+      }
+
+      case EmailTemplate.INTEGRITY_ISSUES: {
+        return React.createElement(IntegrityIssuesEmail, { ...data, customTemplate });
       }
     }
   }

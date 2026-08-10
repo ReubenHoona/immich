@@ -80,6 +80,28 @@ type WaitOptions = { event: EventType; id?: string; total?: number; timeout?: nu
 type AdminSetupOptions = { onboarding?: boolean };
 type FileData = { bytes?: Buffer; filename: string };
 
+export type ServerLogLine = {
+  /** The untouched log line as emitted by the container. */
+  raw: string;
+  /** Parsed JSON payload when the server runs with `IMMICH_LOG_FORMAT=json`, otherwise undefined. */
+  json?: Record<string, any>;
+  /** Best-effort message text (JSON `message` field when present, else the raw line). */
+  message: string;
+  /** JSON `context` field (carries the `appName:context~correlationId` prefix) when present. */
+  context?: string;
+};
+
+type CaptureLogsOptions = {
+  /** Keep only lines whose text contains this correlation id (matches the `~<id>` prefix or a bare id). */
+  correlationId?: string;
+  /** Keep only lines whose text contains this asset id. */
+  assetId?: string;
+  /** Only fetch lines newer than this instant (Date or docker `--since` string, e.g. an ISO timestamp). */
+  since?: Date | string;
+  /** Cap the number of trailing lines fetched from the container (default 5000). */
+  tail?: number;
+};
+
 const dbUrl = `postgres://postgres:postgres@${playwrightDbHost}:5435/immich`;
 export const baseUrl = playwriteBaseUrl;
 export const shareUrl = `${baseUrl}/share`;
@@ -690,6 +712,55 @@ export const utils = {
     await utils.waitForQueueFinish(accessToken, 'library');
     await utils.waitForQueueFinish(accessToken, 'sidecar');
     await utils.waitForQueueFinish(accessToken, 'metadataExtraction');
+  },
+
+  /**
+   * Capture the e2e server container's logs (`docker logs immich-e2e-server`) and return them as
+   * structured lines. When the stack runs with `IMMICH_LOG_LEVEL=verbose` + `IMMICH_LOG_FORMAT=json`
+   * each line parses to JSON; otherwise the raw text is preserved. Filtering by `correlationId`
+   * (the `~<id>` journey prefix) or `assetId` is a substring match on the raw line, so it works in
+   * both text and JSON log formats. This is the one missing primitive for cross-layer evidence.
+   */
+  captureServerLogs: async (options?: CaptureLogsOptions): Promise<ServerLogLine[]> => {
+    const args = ['logs'];
+    if (options?.since) {
+      const since = options.since instanceof Date ? options.since.toISOString() : options.since;
+      args.push('--since', since);
+    }
+    args.push('--tail', String(options?.tail ?? 5000), 'immich-e2e-server');
+
+    const { stdout, stderr } = await executeCommand('docker', args).promise;
+    // docker sends container stdout to our stdout and stderr to our stderr; the server logs to both.
+    const raw = [stdout, stderr].filter(Boolean).join('\n');
+    const parsed: ServerLogLine[] = raw
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        let json: Record<string, any> | undefined;
+        try {
+          const candidate = JSON.parse(line);
+          json = candidate && typeof candidate === 'object' ? candidate : undefined;
+        } catch {
+          json = undefined;
+        }
+        return {
+          raw: line,
+          json,
+          message: typeof json?.message === 'string' ? json.message : line,
+          context: typeof json?.context === 'string' ? json.context : undefined,
+        };
+      });
+
+    return parsed.filter((entry) => {
+      if (options?.correlationId && !entry.raw.includes(options.correlationId)) {
+        return false;
+      }
+      if (options?.assetId && !entry.raw.includes(options.assetId)) {
+        return false;
+      }
+      return true;
+    });
   },
 
   async poll<T>(cb: () => Promise<T>, validate: (value: T) => boolean, map?: (value: T) => any) {

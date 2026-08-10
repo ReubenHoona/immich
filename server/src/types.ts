@@ -207,6 +207,12 @@ export type JobOf<T extends JobName> = Jobs[T];
 
 export interface IBaseJob {
   force?: boolean;
+  /**
+   * Optional journey correlation id. When set, the job worker seeds CLS with it so the
+   * `~<id>` log prefix threads an HTTP request through every job it queues (e.g. the
+   * thumbnail regeneration queued by an in-place original restore).
+   */
+  correlationId?: string;
 }
 
 export interface IDelayedJob extends IBaseJob {
@@ -443,6 +449,7 @@ export type JobItem =
   | { name: JobName.IntegrityChecksumFilesRefresh; data?: IIntegrityPathWithChecksumJob }
   | { name: JobName.IntegrityDeleteReportType; data: IIntegrityDeleteReportTypeJob }
   | { name: JobName.IntegrityDeleteReports; data: IIntegrityDeleteReportsJob }
+  | { name: JobName.IntegrityNotify; data?: IBaseJob }
 
   // Editor
   | { name: JobName.AssetEditThumbnailGeneration; data: IEntityJob };
@@ -544,6 +551,7 @@ export interface SystemMetadata extends Record<SystemMetadataKey, Record<string,
   [SystemMetadataKey.VersionCheckState]: VersionCheckMetadata;
   [SystemMetadataKey.MemoriesState]: MemoriesState;
   [SystemMetadataKey.IntegrityChecksumCheckpoint]: { date?: string };
+  [SystemMetadataKey.IntegrityNotificationState]: { lastNotifiedAt?: string };
 }
 
 export type UserPreferences = {

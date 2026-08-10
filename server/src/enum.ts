@@ -363,6 +363,7 @@ export enum SystemMetadataKey {
   VersionCheckState = 'version-check-state',
   License = 'license',
   IntegrityChecksumCheckpoint = 'integrity-checksum-checkpoint',
+  IntegrityNotificationState = 'integrity-notification-state',
 }
 
 export enum UserMetadataKey {
@@ -447,6 +448,7 @@ export enum ManualJobName {
   IntegrityMissingFilesDeleteAll = `integrity-missing-files-delete-all`,
   IntegrityUntrackedFilesDeleteAll = `integrity-untracked-files-delete-all`,
   IntegrityChecksumFilesDeleteAll = `integrity-checksum-mismatch-delete-all`,
+  IntegrityNotifications = `integrity-notifications`,
 }
 
 export const ManualJobNameSchema = z.enum(ManualJobName).describe('Manual job name').meta({ id: 'ManualJobName' });
@@ -935,6 +937,7 @@ export enum JobName {
   IntegrityChecksumFilesRefresh = 'IntegrityChecksumFilesRefresh',
   IntegrityDeleteReportType = 'IntegrityDeleteReportType',
   IntegrityDeleteReports = 'IntegrityDeleteReports',
+  IntegrityNotify = 'IntegrityNotify',
 }
 
 export const JobNameSchema = z.enum(JobName).describe('Job name').meta({ id: 'JobName' });
@@ -1146,6 +1149,7 @@ export const NotificationLevelSchema = z
 export enum NotificationType {
   JobFailed = 'JobFailed',
   BackupFailed = 'BackupFailed',
+  IntegrityIssues = 'IntegrityIssues',
   SystemMessage = 'SystemMessage',
   AlbumInvite = 'AlbumInvite',
   AlbumUpdate = 'AlbumUpdate',

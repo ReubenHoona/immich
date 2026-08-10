@@ -174,6 +174,21 @@ void main() {
       expect(result, isEmpty);
     });
 
+    test('re-includes an offline backed-up asset and threads its id as the restore target', () async {
+      final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+      // An uploaded asset (library_id NULL) whose server original is missing -> offline.
+      final remote = await ctx.newRemoteAsset(ownerId: userId, isOffline: true, libraryIdOption: const Option.none());
+      final local = await ctx.newLocalAsset(checksum: remote.checksum);
+      await ctx.newLocalAlbumAsset(albumId: album.id, assetId: local.id);
+
+      final result = await sut.getCandidates(userId);
+      expect(result.length, 1);
+      expect(result.first.id, local.id);
+      // The offline server asset id is threaded so the upload heals it in place via
+      // PUT /assets/:id/original instead of creating a new asset.
+      expect(result.first.remoteId, remote.id);
+    });
+
     test('includes asset backed up for a different user', () async {
       final otherUser = await ctx.newUser();
       final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);

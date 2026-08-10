@@ -123,6 +123,10 @@ void main() {
     when(
       () => mockSyncStreamRepo.updateAssetsV1(any(), debugLabel: any(named: 'debugLabel')),
     ).thenAnswer(successHandler);
+    when(() => mockSyncStreamRepo.updateAssetsV2(any())).thenAnswer(successHandler);
+    when(
+      () => mockSyncStreamRepo.updateAssetsV2(any(), debugLabel: any(named: 'debugLabel')),
+    ).thenAnswer(successHandler);
     when(() => mockSyncStreamRepo.deleteAssetsV1(any())).thenAnswer(successHandler);
     when(
       () => mockSyncStreamRepo.deleteAssetsV1(any(), debugLabel: any(named: 'debugLabel')),
@@ -524,6 +528,27 @@ void main() {
       verify(() => mockLocalAssetRepo.getAssetsFromBackupAlbums(any())).called(1);
       verifyNever(() => mockAssetMediaRepo.deleteAll(any()));
       verify(() => mockSyncStreamRepo.deleteAssetsV1(any())).called(1);
+    });
+
+    test("trashes local copies of remote-deleted assets from assetV2 trash events", () async {
+      final trashedAsset = LocalAssetStub.image1.copyWith(id: 'local-v2', checksum: 'checksum-trashed');
+      when(() => mockLocalAssetRepo.getAssetsFromBackupAlbums(any())).thenAnswer((invocation) async {
+        final Iterable<String> requestedRemoteIds = invocation.positionalArguments.first as Iterable<String>;
+        expect(requestedRemoteIds.toSet(), equals({'remote-trashed'}));
+        return {
+          'album-a': [trashedAsset],
+        };
+      });
+
+      final events = [
+        SyncStreamStub.assetV2Trashed(id: 'remote-trashed', checksum: 'checksum-trashed', ack: 'asset-v2-trashed'),
+      ];
+
+      await simulateEvents(events);
+
+      verify(() => mockLocalAssetRepo.getAssetsFromBackupAlbums(any())).called(1);
+      verify(() => mockSyncStreamRepo.updateAssetsV2(any())).called(1);
+      verify(() => mockAssetMediaRepo.deleteAll(any())).called(1);
     });
 
     test("restores trashed local assets once the matching remote assets leave the trash", () async {

@@ -424,6 +424,7 @@ select
   "asset"."type",
   "asset"."deletedAt",
   "asset"."isFavorite",
+  "asset"."isOffline",
   "asset"."visibility",
   "asset"."duration",
   "asset"."livePhotoVideoId",

@@ -103,7 +103,9 @@ class ForegroundUploadService {
           final requireWifi = _shouldRequireWiFi(asset);
           return requireWifi && !hasWifi;
         },
-        processItem: (asset) => uploadSingleAsset(asset, cancelToken, callbacks: callbacks),
+        // getCandidates threads the offline server asset id onto restore candidates as remoteId.
+        processItem: (asset) =>
+            uploadSingleAsset(asset, cancelToken, callbacks: callbacks, restoreAssetId: asset.remoteId),
       );
     }
   }
@@ -129,7 +131,8 @@ class ForegroundUploadService {
         continue;
       }
 
-      await uploadSingleAsset(asset, cancelToken, callbacks: callbacks);
+      // getCandidates threads the offline server asset id onto restore candidates as remoteId.
+      await uploadSingleAsset(asset, cancelToken, callbacks: callbacks, restoreAssetId: asset.remoteId);
     }
   }
 
@@ -241,6 +244,7 @@ class ForegroundUploadService {
     LocalAsset asset,
     Completer<void>? cancelToken, {
     required UploadCallbacks callbacks,
+    String? restoreAssetId,
   }) async {
     final t = StaticTranslations.instance;
     final assetNotFoundOnDevice = CurrentPlatform.isAndroid
@@ -255,6 +259,10 @@ class ForegroundUploadService {
         callbacks.onError?.call(asset.localId!, assetNotFoundOnDevice);
         return;
       }
+
+      // An in-place restore (PUT /assets/:id/original) heals only the still image; the motion
+      // part would otherwise POST as a stray new asset. Treat restore candidates as non-live.
+      final bool isLivePhoto = entity.isLivePhoto && restoreAssetId == null;
 
       final isAvailableLocally = await _storageRepository.isAssetAvailableLocally(asset.id);
 
@@ -272,7 +280,7 @@ class ForegroundUploadService {
 
         try {
           file = await _storageRepository.loadFileFromCloud(asset.id, progressHandler: progressHandler);
-          if (entity.isLivePhoto) {
+          if (isLivePhoto) {
             livePhotoFile = await _storageRepository.loadMotionFileFromCloud(
               asset.id,
               progressHandler: progressHandler,
@@ -291,7 +299,7 @@ class ForegroundUploadService {
         }
 
         // For live photos, get the motion video file
-        if (entity.isLivePhoto) {
+        if (isLivePhoto) {
           livePhotoFile = await _storageRepository.getMotionFileForAsset(asset);
           if (livePhotoFile == null) {
             _logger.warning("Failed to obtain motion part of the livePhoto - ${asset.name}");
@@ -324,7 +332,7 @@ class ForegroundUploadService {
 
       // Upload live photo video first if available
       String? livePhotoVideoId;
-      if (entity.isLivePhoto && livePhotoFile != null) {
+      if (isLivePhoto && livePhotoFile != null) {
         final livePhotoTitle = p.setExtension(originalFileName, p.extension(livePhotoFile.path));
 
         final onProgress = callbacks.onProgress;
@@ -375,6 +383,9 @@ class ForegroundUploadService {
             ? (bytes, totalBytes) => onProgress(asset.localId!, originalFileName, bytes, totalBytes)
             : null,
         logContext: 'asset[${asset.localId}]',
+        // Non-null only for offline-restore candidates: heal the existing asset in place via
+        // PUT /assets/:id/original rather than creating a new one.
+        restoreAssetId: restoreAssetId,
       );
 
       if (result.isSuccess && result.remoteAssetId != null) {

@@ -88,6 +88,14 @@ abstract final class SyncStreamStub {
     ack: "asset-delete-ack",
   );
 
+  static SyncEvent assetDelete({required String assetId, required String ack}) {
+    return SyncEvent(
+      type: SyncEntityType.assetDeleteV1,
+      data: SyncAssetDeleteV1(assetId: assetId),
+      ack: ack,
+    );
+  }
+
   static SyncEvent assetTrashed({
     required String id,
     required String checksum,
@@ -99,6 +107,35 @@ abstract final class SyncStreamStub {
 
   static SyncEvent assetModified({required String id, required String checksum, required String ack}) {
     return _assetV1(id: id, checksum: checksum, deletedAt: null, ack: ack);
+  }
+
+  static SyncEvent assetV2Trashed({required String id, required String checksum, required String ack, DateTime? trashedAt}) {
+    return SyncEvent(
+      type: SyncEntityType.assetV2,
+      data: SyncAssetV2(
+        checksum: checksum,
+        createdAt: DateTime(2025, 1, 2),
+        deletedAt: trashedAt ?? DateTime(2025, 1, 1),
+        duration: null,
+        fileCreatedAt: DateTime(2025),
+        fileModifiedAt: DateTime(2025, 1, 2),
+        height: null,
+        id: id,
+        isEdited: false,
+        isFavorite: false,
+        libraryId: null,
+        livePhotoVideoId: null,
+        localDateTime: DateTime(2025, 1, 3),
+        originalFileName: '$id.jpg',
+        ownerId: 'owner',
+        stackId: null,
+        thumbhash: null,
+        type: AssetTypeEnum.IMAGE,
+        visibility: AssetVisibility.timeline,
+        width: null,
+      ),
+      ack: ack,
+    );
   }
 
   static SyncEvent _assetV1({

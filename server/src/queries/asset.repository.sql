@@ -305,6 +305,15 @@ set
 where
   "id" = any ($1::uuid[])
 
+-- AssetRepository.setUploadAssetsOffline
+update "asset"
+set
+  "isOffline" = $1
+where
+  "id" = any ($2::uuid[])
+  and "libraryId" is null
+  and "isOffline" = $3
+
 -- AssetRepository.getByChecksum
 select
   "asset".*

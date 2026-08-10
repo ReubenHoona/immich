@@ -43,6 +43,7 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
         FROM local_asset_entity lae
         LEFT JOIN main.remote_asset_entity rae
             ON lae.checksum = rae.checksum AND rae.owner_id = ?1
+            AND (rae.is_offline = 0 OR rae.library_id IS NOT NULL)
         WHERE EXISTS (
             SELECT 1
             FROM local_album_asset_entity laa
@@ -84,32 +85,57 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
       ..addColumns([_db.localAlbumEntity.id])
       ..where(_db.localAlbumEntity.backupSelection.equalsValue(BackupSelection.selected));
 
-    final query = _db.localAssetEntity.select()
-      ..where(
-        (lae) =>
-            existsQuery(
-              _db.localAlbumAssetEntity.selectOnly()
-                ..addColumns([_db.localAlbumAssetEntity.assetId])
-                ..where(
-                  _db.localAlbumAssetEntity.albumId.isInQuery(selectedAlbumIds) &
-                      _db.localAlbumAssetEntity.assetId.equalsExp(lae.id),
-                ),
-            ) &
-            notExistsQuery(
-              _db.remoteAssetEntity.selectOnly()
-                ..addColumns([_db.remoteAssetEntity.checksum])
-                ..where(
-                  _db.remoteAssetEntity.checksum.equalsExp(lae.checksum) & _db.remoteAssetEntity.ownerId.equals(userId),
-                ),
-            ) &
-            lae.id.isNotInQuery(_getExcludedSubquery()),
-      )
-      ..orderBy([(localAsset) => OrderingTerm.desc(localAsset.createdAt)]);
+    final lae = _db.localAssetEntity;
+    // Aliased so the offline-target left join below does not collide with the online-match
+    // anti-join subquery (both reference remote_asset_entity).
+    final offlineRemote = _db.remoteAssetEntity.createAlias('offline_remote');
+
+    var predicate =
+        existsQuery(
+          _db.localAlbumAssetEntity.selectOnly()
+            ..addColumns([_db.localAlbumAssetEntity.assetId])
+            ..where(
+              _db.localAlbumAssetEntity.albumId.isInQuery(selectedAlbumIds) &
+                  _db.localAlbumAssetEntity.assetId.equalsExp(lae.id),
+            ),
+        ) &
+        // Exclude only checksums the server currently holds ONLINE. An offline (file-missing)
+        // upload asset no longer counts as present, so its matching local copy re-qualifies as a
+        // backup candidate and is healed in place (see the left join below) instead of being
+        // excluded forever by the per-owner (ownerId, checksum) uniqueness index.
+        notExistsQuery(
+          _db.remoteAssetEntity.selectOnly()
+            ..addColumns([_db.remoteAssetEntity.checksum])
+            ..where(
+              _db.remoteAssetEntity.checksum.equalsExp(lae.checksum) &
+                  _db.remoteAssetEntity.ownerId.equals(userId) &
+                  // A row still "counts as present" unless it is an offline UPLOAD asset
+                  // (libraryId IS NULL). Offline external-library assets stay excluded — the
+                  // phone must never re-upload externally-managed files.
+                  (_db.remoteAssetEntity.isOffline.equals(false) | _db.remoteAssetEntity.libraryId.isNotNull()),
+            ),
+        ) &
+        lae.id.isNotInQuery(_getExcludedSubquery());
 
     if (onlyHashed) {
-      query.where((lae) => lae.checksum.isNotNull());
+      predicate = predicate & lae.checksum.isNotNull();
     }
 
-    return query.map((localAsset) => localAsset.toDto()).get();
+    final query = _db.select(lae).join([
+      leftOuterJoin(
+        offlineRemote,
+        offlineRemote.checksum.equalsExp(lae.checksum) &
+            offlineRemote.ownerId.equals(userId) &
+            offlineRemote.isOffline.equals(true) &
+            offlineRemote.libraryId.isNull(),
+      ),
+    ])
+      ..where(predicate)
+      ..orderBy([OrderingTerm.desc(lae.createdAt)]);
+
+    final rows = await query.get();
+    // A non-null joined id is the offline asset to heal in place (upload targets
+    // PUT /assets/:id/original); a null id is a fresh candidate that uploads via POST /assets.
+    return rows.map((row) => row.readTable(lae).toDto(remoteId: row.readTableOrNull(offlineRemote)?.id)).toList();
   }
 }

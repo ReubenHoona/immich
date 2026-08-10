@@ -75,11 +75,13 @@ export class MyConsoleLogger extends ConsoleLogger {
 @Telemetry({ enabled: false })
 export class LoggingRepository {
   private logger: MyConsoleLogger;
+  private cls: ClsService | undefined;
 
   constructor(
     @Inject(ClsService) cls: ClsService | undefined,
     @Inject(ConfigRepository) configRepository: ConfigRepository | undefined,
   ) {
+    this.cls = cls;
     let isNoColor = false;
     let logFormat = LogFormat.Console;
     if (configRepository) {
@@ -92,6 +94,14 @@ export class LoggingRepository {
       json: logFormat === LogFormat.Json,
       color: !isNoColor,
     });
+  }
+
+  /**
+   * The current journey/correlation id (the `~<id>` log prefix), or undefined outside a CLS
+   * context. Used to thread an HTTP request's id onto the jobs it queues (see IBaseJob.correlationId).
+   */
+  getCorrelationId(): string | undefined {
+    return this.cls?.getId();
   }
 
   static create(context?: string) {

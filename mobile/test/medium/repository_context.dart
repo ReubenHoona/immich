@@ -117,11 +117,15 @@ class MediumRepositoryContext {
     int? height,
     bool? isFavorite,
     bool? isEdited,
+    bool? isOffline,
     String? livePhotoVideoId,
     String? stackId,
     String? thumbHash,
     String? libraryId,
     DateTime? localDateTime,
+    // Pass const Option.none() to create an upload asset (library_id NULL) rather than the
+    // default random library id.
+    Option<String>? libraryIdOption,
   }) async {
     id ??= TestUtils.uuid();
     createdAt ??= TestUtils.date();
@@ -143,11 +147,12 @@ class MediumRepositoryContext {
             height: .new(height ?? TestUtils.randInt(1000)),
             isFavorite: .new(isFavorite ?? false),
             isEdited: .new(isEdited ?? false),
+            isOffline: .new(isOffline ?? false),
             livePhotoVideoId: .new(livePhotoVideoId),
             stackId: .new(stackId),
             localDateTime: .new(localDateTime ?? createdAt.toLocal()),
             thumbHash: .new(TestUtils.uuid(thumbHash)),
-            libraryId: .new(TestUtils.uuid(libraryId)),
+            libraryId: _resolveUndefined(libraryId, libraryIdOption, const Uuid().v4()),
           ),
         );
   }

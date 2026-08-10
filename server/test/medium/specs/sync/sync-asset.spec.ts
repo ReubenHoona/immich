@@ -57,6 +57,7 @@ describe(SyncEntityType.AssetV2, () => {
           fileModifiedAt: asset.fileModifiedAt,
           createdAt: asset.createdAt,
           isFavorite: asset.isFavorite,
+          isOffline: asset.isOffline,
           localDateTime: asset.localDateTime,
           type: asset.type,
           visibility: asset.visibility,

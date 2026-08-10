@@ -25,7 +25,11 @@ export const getIntegrityReportActions = ($t: MessageFormatter, reportType: Inte
   return { Download, Delete };
 };
 
-export const getIntegrityReportItemActions = ($t: MessageFormatter, reportId: string, reportType: IntegrityReport) => {
+export const getIntegrityReportItemActions = (
+  $t: MessageFormatter,
+  reportId: string,
+  reportType: IntegrityReport,
+) => {
   const Download: ActionItem = {
     title: $t('download'),
     icon: mdiDownload,

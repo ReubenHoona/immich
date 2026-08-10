@@ -51,6 +51,10 @@ class RemoteAssetEntity extends Table with DriftDefaultsMixin, AssetEntityMixin 
 
   BoolColumn get isEdited => boolean().withDefault(const Constant(false))();
 
+  // Drift mirror of the server's asset.isOffline flag: true when the uploaded original is missing
+  // on the server and the asset is eligible for heal-in-place restore (see getCandidates).
+  BoolColumn get isOffline => boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column> get primaryKey => {id};
 }
