@@ -532,23 +532,29 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         # cv2's thread count is process-global; stitch jobs run one at a time (dedicated queue,
         # concurrency 1) so scoping it per-request is safe in practice
         cv2.setNumThreads(options.threads)
-    frames = [_decode(image) for image in images]
-    if options.compositeResolution == "preview":
-        frames = [_downscale(frame, PREVIEW_MAX_DIM) for frame in frames]
     # long chains inflate warp/blend buffers beyond what total input megapixels predict;
     # tighten the budget as frame count grows (measured: 13 frames at 400MP fits 6GB)
     budget = (
-        min(options.maxMegapixels, options.maxMegapixels * 13.0 / len(frames))
-        if len(frames) > 13
+        min(options.maxMegapixels, options.maxMegapixels * 13.0 / len(images))
+        if len(images) > 13
         else options.maxMegapixels
     )
-    total_megapixels = sum(frame.shape[0] * frame.shape[1] for frame in frames) / 1e6
-    if total_megapixels > budget:
-        # Scale all frames proportionally to fit the memory budget instead of failing —
-        # e.g. ten 50MP frames come down to ~40MP each rather than erroring out.
-        scale = (budget / total_megapixels) ** 0.5
-        frames = [
-            cast(
+    # Decode -> scale -> free one frame at a time. Holding every full-res frame before scaling
+    # (a 20x50MP sweep is ~3GB of BGR) doubled the peak and could OOM-kill the worker; per-frame
+    # capping keeps the peak to one full-res frame plus the scaled set. An equal per-frame share
+    # of the budget matches proportional scaling for the common same-resolution burst.
+    allowance = budget / len(images)
+    frames: list[NDArray[np.uint8]] = []
+    total_megapixels = 0.0
+    for image in images:
+        frame = _decode(image)
+        if options.compositeResolution == "preview":
+            frame = _downscale(frame, PREVIEW_MAX_DIM)
+        megapixels = frame.shape[0] * frame.shape[1] / 1e6
+        total_megapixels += megapixels
+        if megapixels > allowance:
+            scale = (allowance / megapixels) ** 0.5
+            frame = cast(
                 NDArray[np.uint8],
                 cv2.resize(
                     frame,
@@ -556,9 +562,12 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
                     interpolation=cv2.INTER_AREA,
                 ),
             )
-            for frame in frames
-        ]
-        log.info(f"Panorama input of {total_megapixels:.0f}MP exceeds {budget:.0f}MP budget, scaling by {scale:.2f}")
+        frames.append(frame)
+    if total_megapixels > budget:
+        log.info(
+            f"Panorama input of {total_megapixels:.0f}MP exceeds {budget:.0f}MP budget, "
+            f"frames capped to {allowance:.1f}MP each"
+        )
 
     def try_stitch(mode: int, confidence: float) -> tuple[int, NDArray[np.uint8] | None]:
         stitcher = cv2.Stitcher.create(mode)
