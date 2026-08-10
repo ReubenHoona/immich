@@ -6,6 +6,7 @@ All functions here are synchronous and CPU-bound; callers run them in the thread
 """
 
 import multiprocessing as mp
+import os
 import threading
 from typing import Any, Literal, TypedDict, cast
 
@@ -45,6 +46,7 @@ class StitchOptions(BaseModel):
     maxMegapixels: float = Field(default=400.0, gt=0.0, le=1000.0)
     verifySources: bool = True
     sphericalFallback: bool = True
+    threads: int = Field(default=0, ge=0, le=64)  # cv2 worker threads for stitching; 0 = library default
 
 
 MAX_FRAMES = 32
@@ -394,6 +396,9 @@ def _spherical_child(conn: Any) -> None:
     try:
         assert _spherical_input is not None
         frames, options = _spherical_input
+        # the fork inherits the parent's cv2 thread-pool *state* but not its worker threads;
+        # explicitly reconfiguring the pool prevents dispatching work to threads that don't exist
+        cv2.setNumThreads(options.threads if options.threads > 0 else max(1, (os.cpu_count() or 2) - 1))
         conn.send(_stitch_spherical_impl(frames, options))
     except PanoramaError as err:
         conn.send(err)
@@ -523,6 +528,10 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     """Stitch ordered frames into a panorama. Returns (jpeg bytes, width, height)."""
     if not 2 <= len(images) <= MAX_FRAMES:
         raise PanoramaError(400, f"Panorama stitching needs 2..{MAX_FRAMES} images, got {len(images)}")
+    if options.threads > 0:
+        # cv2's thread count is process-global; stitch jobs run one at a time (dedicated queue,
+        # concurrency 1) so scoping it per-request is safe in practice
+        cv2.setNumThreads(options.threads)
     frames = [_decode(image) for image in images]
     if options.compositeResolution == "preview":
         frames = [_downscale(frame, PREVIEW_MAX_DIM) for frame in frames]
