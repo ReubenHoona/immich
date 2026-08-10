@@ -5,6 +5,8 @@ Exposed through dedicated endpoints in main.py (the /predict pipeline is single-
 All functions here are synchronous and CPU-bound; callers run them in the thread pool.
 """
 
+import multiprocessing as mp
+import threading
 from typing import Any, Literal, TypedDict, cast
 
 import cv2
@@ -42,10 +44,20 @@ class StitchOptions(BaseModel):
     cropAuto: bool = True
     maxMegapixels: float = Field(default=400.0, gt=0.0, le=1000.0)
     verifySources: bool = True
+    sphericalFallback: bool = True
 
 
 MAX_FRAMES = 32
 PREVIEW_MAX_DIM = 1440
+SPHERICAL_REGISTER_DIM = 1600  # feature/registration resolution for the spherical fallback
+SPHERICAL_RANGE_WIDTH = 5  # match each frame to +/- this many ordered neighbours
+SPHERICAL_TIMEOUT_S = 600  # hard cap on the isolated spherical stitch subprocess
+
+# The spherical fallback runs in a forked child (see _stitch_spherical). Frames are handed to the
+# child via this module global (inherited copy-on-write) rather than pickled; the lock serialises the
+# brief fork setup across worker threads.
+_spherical_lock = threading.Lock()
+_spherical_input: tuple[list[NDArray[np.uint8]], StitchOptions] | None = None
 
 
 class LinkStats(TypedDict):
@@ -320,6 +332,193 @@ def _verify_sources(frames: list[NDArray[np.uint8]], pano: NDArray[np.uint8]) ->
     return missing
 
 
+def _encode_pano(pano: NDArray[np.uint8], quality: int) -> tuple[bytes, int, int]:
+    params = [cv2.IMWRITE_JPEG_QUALITY, quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
+    if quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):
+        params += [cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444]
+    ok, encoded = cv2.imencode(".jpg", pano, params)
+    if not ok:
+        raise PanoramaError(500, "Failed to encode stitched panorama")
+    height, width = pano.shape[:2]
+    return encoded.tobytes(), width, height
+
+
+def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -> tuple[bytes, int, int] | None:
+    """Hugin-class spherical fallback for wide/360 rotational sweeps the high-level cv2.Stitcher
+    cannot register (it fails camera-parameter adjustment). Pipeline: ORB features -> ordered range
+    matcher -> ray bundle adjustment -> horizontal wave correction -> spherical warp -> gain
+    compensation -> Voronoi seams -> multi-band blend. Registration runs at SPHERICAL_REGISTER_DIM;
+    the warp/blend composite is capped by frame count so a wide canvas stays tractable. Returns the
+    encoded (jpeg, w, h), or None when registration collapses (caller then raises 422).
+
+    The low-level cv2.detail pipeline can segfault or OOM on pathological input, which would otherwise
+    take down the whole ML worker, so it runs in a forked subprocess. Any crash/timeout returns None
+    (caller then raises 422); a validated-but-unusable result surfaces as PanoramaError."""
+    global _spherical_input
+    ctx = mp.get_context("fork")
+    with _spherical_lock:
+        _spherical_input = (frames, options)
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_spherical_child, args=(child_conn,), daemon=True)
+        try:
+            proc.start()
+            child_conn.close()  # only the child keeps the send end
+            outcome: Any = None
+            produced = parent_conn.poll(SPHERICAL_TIMEOUT_S)
+            if produced:
+                try:
+                    outcome = parent_conn.recv()
+                except EOFError:  # child died (segfault/OOM) before sending
+                    produced = False
+            parent_conn.close()
+            proc.join(5)
+            if proc.is_alive():
+                proc.terminate()
+                proc.join()
+                log.warning("Spherical stitch exceeded the time budget; aborted")
+                return None
+        finally:
+            _spherical_input = None
+    if not produced:
+        log.info(f"Spherical stitch subprocess produced no result (exit {proc.exitcode})")
+        return None
+    if isinstance(outcome, PanoramaError):
+        raise outcome
+    return cast("tuple[bytes, int, int] | None", outcome)
+
+
+def _spherical_child(conn: Any) -> None:
+    # Runs in the forked child; reads the handed-over frames from the inherited module global and
+    # returns the outcome (encoded tuple, a PanoramaError, or None) over the pipe. A segfault/OOM
+    # simply closes the pipe, which the parent reads as "no result".
+    try:
+        assert _spherical_input is not None
+        frames, options = _spherical_input
+        conn.send(_stitch_spherical_impl(frames, options))
+    except PanoramaError as err:
+        conn.send(err)
+    except Exception as err:  # cv2.error and anything else -> not a coherent sweep
+        log.info(f"Spherical stitch: registration failed ({type(err).__name__}: {str(err).splitlines()[0][:80]})")
+        conn.send(None)
+    finally:
+        conn.close()
+
+
+def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptions) -> tuple[bytes, int, int] | None:
+    # cv2's `detail_*` classes and PyRotationWarper are absent from the opencv type stubs; route
+    # them through an Any alias so the stub gaps don't fail mypy (matching this module's loose-cv2 style).
+    cv2_: Any = cv2
+    n = len(frames)
+    reg = [_downscale(f, SPHERICAL_REGISTER_DIM) for f in frames]
+    finder = cv2.ORB.create(nfeatures=3000)
+    features = [cv2.detail.computeImageFeatures2(finder, im) for im in reg]
+
+    def _match(feats: list[Any]) -> Any:
+        # ordered range matcher: only compare each frame to +/- SPHERICAL_RANGE_WIDTH neighbours.
+        # Full O(n^2) matching injects spurious long-range pairs that make ray bundle adjustment
+        # diverge on long chains; the sequential graph converges reliably.
+        matcher = cv2_.detail_BestOf2NearestRangeMatcher(SPHERICAL_RANGE_WIDTH, False, 0.3)
+        pairwise = matcher.apply2(feats)
+        matcher.collectGarbage()
+        return pairwise
+
+    matches = _match(features)
+    keep = [int(i) for i in np.asarray(cv2.detail.leaveBiggestComponent(features, matches, 0.3)).flatten()]
+    if len(keep) < 3:
+        log.info(f"Spherical stitch: only {len(keep)} of {n} frames connected; not a coherent sweep")
+        return None
+    reg = [reg[i] for i in keep]
+    features = [features[i] for i in keep]
+    matches = _match(features)
+
+    ok, cameras = cv2_.detail_HomographyBasedEstimator().apply(features, matches, None)
+    if not ok:
+        return None
+    for cam in cameras:
+        cam.R = cam.R.astype(np.float32)
+
+    adjuster = cv2_.detail_BundleAdjusterRay()
+    adjuster.setConfThresh(0.5)  # 0.3 keeps too-weak pairs and diverges; 0.5 is the stable floor
+    refine = np.zeros((3, 3), np.uint8)  # standard 5-param mask (fx, skew, ppx, aspect, ppy)
+    refine[0, 0] = refine[0, 1] = refine[0, 2] = refine[1, 1] = refine[1, 2] = 1
+    adjuster.setRefinementMask(refine)
+    ok, cameras = adjuster.apply(features, matches, cameras)
+    if not ok:
+        log.info("Spherical stitch: bundle adjustment did not converge")
+        return None
+
+    rmats: list[Any] = [np.copy(cam.R) for cam in cameras]
+    rmats = list(cv2.detail.waveCorrect(rmats, cv2.detail.WAVE_CORRECT_HORIZ))  # level a hand-held arc
+    for i, cam in enumerate(cameras):
+        cam.R = rmats[i]
+    warped_scale = float(np.median(sorted(cam.focal for cam in cameras)))
+
+    kept = len(reg)
+    compose_cap = 1400 if kept <= 8 else 1100 if kept <= 16 else 900 if kept <= 24 else 720
+    if options.compositeResolution == "preview":
+        compose_cap = min(compose_cap, PREVIEW_MAX_DIM // 2)
+    compose_factor = min(1.0, compose_cap / max(reg[0].shape[:2]))
+    warper = cv2_.PyRotationWarper("spherical", warped_scale * compose_factor)
+
+    corners: list[Any] = []
+    sizes: list[tuple[int, int]] = []
+    images_warped: list[Any] = []
+    masks_warped: list[Any] = []
+    for i, im in enumerate(reg):
+        if compose_factor < 1.0:
+            im = cast(
+                NDArray[np.uint8],
+                cv2.resize(im, None, fx=compose_factor, fy=compose_factor, interpolation=cv2.INTER_AREA),
+            )
+        K = cameras[i].K().astype(np.float32)
+        K[0, 0] *= compose_factor
+        K[0, 2] *= compose_factor
+        K[1, 1] *= compose_factor
+        K[1, 2] *= compose_factor
+        corner, image_wp = warper.warp(im, K, cameras[i].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
+        _, mask_wp = warper.warp(
+            255 * np.ones(im.shape[:2], np.uint8), K, cameras[i].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT
+        )
+        corners.append(corner)
+        sizes.append((image_wp.shape[1], image_wp.shape[0]))
+        images_warped.append(image_wp)
+        masks_warped.append(mask_wp)
+
+    compensator = cv2_.detail_BlocksGainCompensator()
+    compensator.feed(corners, images_warped, masks_warped)
+    for i in range(kept):
+        compensator.apply(i, corners[i], images_warped[i], masks_warped[i])
+
+    seam_finder = cv2_.detail_VoronoiSeamFinder()  # fast; DpSeamFinder is O(minutes) on long chains
+    masks_seam = seam_finder.find([img.astype(np.float32) for img in images_warped], corners, masks_warped)
+
+    blender = cv2_.detail_MultiBandBlender()
+    dst_sz = cv2.detail.resultRoi(corners, sizes)
+    blend_width = float(np.sqrt(dst_sz[2] * dst_sz[3]) * 0.05)
+    blender.setNumBands(max(1, int(np.log2(blend_width)) - 1) if blend_width > 1 else 1)
+    blender.prepare(dst_sz)
+    for i in range(kept):
+        blender.feed(cv2_.UMat(images_warped[i].astype(np.int16)), masks_seam[i], corners[i])
+    result, _ = blender.blend(None, None)
+    pano = cast(NDArray[np.uint8], cv2.convertScaleAbs(result))
+
+    if options.cropAuto:
+        pano = _autocrop(pano)
+
+    # Spherical-specific guards: the planar degenerate/verify checks compare to full-res source
+    # frames, but this canvas is intentionally down-composited, so gauge against the warped frame
+    # size instead and require a wide, well-filled strip.
+    compose_frame_area = float(np.median([w * h for (w, h) in sizes]))
+    if pano.shape[0] < 64 or pano.shape[1] < 256 or pano.shape[0] * pano.shape[1] < 0.4 * compose_frame_area:
+        raise PanoramaError(422, "Stitch failed: spherical registration collapsed the scene")
+    filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
+    if filled < 0.80:
+        raise PanoramaError(422, f"Stitch failed: spherical result only {filled:.0%} filled")
+
+    log.info(f"Spherical fallback stitched {kept}/{n} frames into {pano.shape[1]}x{pano.shape[0]}")
+    return _encode_pano(pano, options.quality)
+
+
 def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
     """Stitch ordered frames into a panorama. Returns (jpeg bytes, width, height)."""
     if not 2 <= len(images) <= MAX_FRAMES:
@@ -371,25 +570,40 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         # flat subjects photographed close up (documents, boards) violate the rotational
         # model but stitch cleanly with the affine SCANS pipeline
         status, pano = try_stitch(cv2.Stitcher_SCANS, 0.5)
+    def spherical_fallback_or_raise(planar_reason: str) -> tuple[bytes, int, int]:
+        # Wide/360 rotational sweeps either fail the high-level stitcher's camera-parameter
+        # adjustment (status 3) or slip through as a degenerate OK result; both recover with the
+        # low-level spherical pipeline. Try it before surfacing the planar failure reason.
+        if options.sphericalFallback and len(frames) >= 3:
+            try:
+                spherical = _stitch_spherical(frames, options)
+            except cv2.error as error:
+                log.warning(f"Spherical fallback raised: {str(error).splitlines()[-1][:120]}")
+                spherical = None
+            if spherical is not None:
+                return spherical
+        raise PanoramaError(422, planar_reason)
+
     if status != cv2.Stitcher_OK or pano is None:
         reasons = {
             cv2.Stitcher_ERR_NEED_MORE_IMGS: "not enough overlapping content",
             cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL: "homography estimation failed",
             cv2.Stitcher_ERR_CAMERA_PARAMS_ADJUST_FAIL: "camera parameter adjustment failed",
         }
-        raise PanoramaError(422, f"Stitch failed: {reasons.get(status, f'status {status}')}")
+        return spherical_fallback_or_raise(f"Stitch failed: {reasons.get(status, f'status {status}')}")
     if options.cropAuto:
         pano = _autocrop(pano)
 
     # A structurally broken registration can still return Stitcher_OK, either by
     # collapsing the scene into a smear far smaller than any input frame, or by
-    # scattering fragments across a huge mostly-black canvas.
+    # scattering fragments across a huge mostly-black canvas. These are exactly the wide/360
+    # sweeps the spherical fallback recovers, so route degenerate planar output there too.
     median_frame_area = float(np.median([frame.shape[0] * frame.shape[1] for frame in frames]))
     if pano.shape[0] * pano.shape[1] < 0.5 * median_frame_area:
-        raise PanoramaError(422, "Stitch failed: degenerate result (registration collapsed the scene)")
+        return spherical_fallback_or_raise("Stitch failed: degenerate result (registration collapsed the scene)")
     filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
     if filled < 0.85:
-        raise PanoramaError(422, f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
+        return spherical_fallback_or_raise(f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
     if options.verifySources:
         missing = _verify_sources(frames, pano)
         if missing and len(frames) - len(missing) < max(2, len(frames) // 2):
@@ -399,12 +613,6 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
             # deliver the partial panorama rather than nothing
             log.warning(f"Partial panorama: {len(missing)} of {len(frames)} frames not in the result ({missing})")
 
-    params = [cv2.IMWRITE_JPEG_QUALITY, options.quality, cv2.IMWRITE_JPEG_OPTIMIZE, 1]
-    if options.quality >= 95 and hasattr(cv2, "IMWRITE_JPEG_SAMPLING_FACTOR"):
-        params += [cv2.IMWRITE_JPEG_SAMPLING_FACTOR, cv2.IMWRITE_JPEG_SAMPLING_FACTOR_444]
-    ok, encoded = cv2.imencode(".jpg", pano, params)
-    if not ok:
-        raise PanoramaError(500, "Failed to encode stitched panorama")
     height, width = pano.shape[:2]
     log.info(f"Stitched {len(images)} frames into {width}x{height} panorama ({width * height / 1e6:.1f}MP)")
-    return encoded.tobytes(), width, height
+    return _encode_pano(pano, options.quality)

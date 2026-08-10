@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from immich_ml.panorama import DetectOptions, PanoramaError, StitchOptions, detect, stitch
+from immich_ml.panorama import DetectOptions, PanoramaError, StitchOptions, _stitch_spherical, detect, stitch
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +44,23 @@ def _encode(img: np.ndarray) -> bytes:
     ok, buf = cv2.imencode(".png", img)
     assert ok
     return buf.tobytes()
+
+
+def _rotated_views(scene: np.ndarray, count: int = 5, deg_step: float = 7.0) -> list[np.ndarray]:
+    """Synthesize a genuine rotational sweep: the same scene viewed at yaw increments, which is
+    what the spherical pipeline models (translational strips fit a planar model, not a sphere)."""
+    height, width = scene.shape[:2]
+    focal = float(width)
+    K = np.array([[focal, 0, width / 2], [0, focal, height / 2], [0, 0, 1]], dtype=np.float64)
+    k_inv = np.linalg.inv(K)
+    frames = []
+    for i in range(count):
+        angle = np.deg2rad((i - (count - 1) / 2) * deg_step)
+        rot = np.array(
+            [[np.cos(angle), 0, np.sin(angle)], [0, 1, 0], [-np.sin(angle), 0, np.cos(angle)]], dtype=np.float64
+        )
+        frames.append(cv2.warpPerspective(scene, K @ rot @ k_inv, (width, height)))
+    return frames
 
 
 class TestPanoramaDetect:
@@ -134,3 +151,24 @@ class TestPanoramaStitch:
         hi, _, _ = stitch(strips, StitchOptions(quality=97))
         lo, _, _ = stitch(strips, StitchOptions(quality=60))
         assert len(hi) > len(lo)
+
+
+class TestSphericalFallback:
+    def test_spherical_fallback_is_crash_isolated(self) -> None:
+        # The low-level cv2.detail pipeline can segfault/OOM on pathological input; fork isolation
+        # must turn that into a graceful None (or a valid wide panorama), never a crashed worker.
+        frames = _rotated_views(_textured_scene(width=1200, height=800), count=5, deg_step=7.0)
+        result = _stitch_spherical(frames, StitchOptions(compositeResolution="preview"))
+        assert result is None or (result[1] > result[2] and len(result[0]) > 0)
+
+    def test_spherical_returns_none_when_disconnected(self) -> None:
+        # unrelated frames: registration collapses (cv2.detail may raise/segfault) -> graceful None
+        frames = [_textured_scene(seed=s) for s in (1, 500, 999)]
+        assert _stitch_spherical(frames, StitchOptions()) is None
+
+    def test_fallback_disabled_surfaces_planar_failure(self) -> None:
+        rngs = [np.random.default_rng(i) for i in range(3)]
+        frames = [_encode(r.integers(0, 255, (600, 800, 3), dtype=np.uint8)) for r in rngs]
+        with pytest.raises(PanoramaError) as err:
+            stitch(frames, StitchOptions(sphericalFallback=False))
+        assert err.value.status_code == 422
