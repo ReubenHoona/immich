@@ -262,7 +262,7 @@ class SyncStreamRepository extends DatabaseAccessor<Drift> with $SyncStreamRepos
             width: Value(asset.width),
             height: Value(asset.height),
             isEdited: Value(asset.isEdited),
-            isOffline: Value(asset.isOffline ?? false),
+            isOffline: Value(asset.isOffline),
           );
 
           batch.insert(
