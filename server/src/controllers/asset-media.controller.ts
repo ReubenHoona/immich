@@ -92,7 +92,7 @@ export class AssetMediaController {
   }
 
   @Put(':id/original')
-  @Authenticated({ permission: Permission.AssetUpload })
+  @Authenticated({ permission: Permission.AssetUpdate })
   // FileUploadInterceptor ONLY — NOT AssetUploadInterceptor, whose x-immich-checksum short-circuit
   // would answer DUPLICATE before the bytes arrive (the offline row still owns the checksum).
   @UseInterceptors(FileUploadInterceptor)

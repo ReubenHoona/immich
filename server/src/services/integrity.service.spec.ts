@@ -1,4 +1,4 @@
-import { IntegrityReport } from 'src/enum';
+import { AssetStatus, IntegrityReport } from 'src/enum';
 import { IntegrityService } from 'src/services/integrity.service';
 import { newTestService, ServiceMocks } from 'test/utils';
 
@@ -92,6 +92,24 @@ describe(IntegrityService.name, () => {
       expect(mocks.integrityReport.getAssetIdsByReportIds).not.toHaveBeenCalled();
       expect(mocks.asset.setUploadAssetsOffline).not.toHaveBeenCalled();
       expect(mocks.integrityReport.deleteByIds).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteIntegrityReport', () => {
+    it('should clear isOffline when trashing the asset, so a restore-from-trash is not stuck offline', async () => {
+      mocks.integrityReport.getById.mockResolvedValue({
+        path: '/data/upload/photo.jpg',
+        assetId: 'asset-1',
+        fileAssetId: null,
+      } as never);
+
+      await sut.deleteIntegrityReport('user-1', 'report-1');
+
+      expect(mocks.asset.updateAll).toHaveBeenCalledWith(
+        ['asset-1'],
+        expect.objectContaining({ status: AssetStatus.Trashed, isOffline: false }),
+      );
+      expect(mocks.integrityReport.deleteById).toHaveBeenCalledWith('report-1');
     });
   });
 });

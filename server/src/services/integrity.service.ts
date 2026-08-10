@@ -190,9 +190,14 @@ export class IntegrityService extends BaseService {
     const { path, assetId, fileAssetId } = await this.integrityRepository.getById(id);
 
     if (assetId) {
+      // Clear the offline flag too: resolving a missing-file report removes it out-of-band, so
+      // without this a later restore-from-trash would leave the asset stuck isOffline=true with no
+      // report for the scan's clear path to re-arm on. If the file is still missing after restore,
+      // the next scan re-flags it.
       await this.assetRepository.updateAll([assetId], {
         deletedAt: new Date(),
         status: AssetStatus.Trashed,
+        isOffline: false,
       });
 
       await this.eventRepository.emit('AssetTrashAll', {
@@ -721,9 +726,12 @@ export class IntegrityService extends BaseService {
 
     if (byAsset.length > 0) {
       const ids = byAsset.map(({ assetId }) => assetId!);
+      // Clear the offline flag as well (see deleteIntegrityReport) so a restore-from-trash of a
+      // once-missing upload asset is not left permanently stuck isOffline=true.
       await this.assetRepository.updateAll(ids, {
         deletedAt: new Date(),
         status: AssetStatus.Trashed,
+        isOffline: false,
       });
 
       await this.eventRepository.emit('AssetTrashAll', {
