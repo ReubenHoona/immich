@@ -7,6 +7,7 @@ All functions here are synchronous and CPU-bound; callers run them in the thread
 
 import multiprocessing as mp
 import os
+import signal
 import threading
 from typing import Any, Literal, TypedDict, cast
 
@@ -15,7 +16,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from immich_ml.config import log
+from immich_ml.config import log, settings
 
 
 class PanoramaError(Exception):
@@ -375,9 +376,12 @@ def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -
             parent_conn.close()
             proc.join(5)
             if proc.is_alive():
-                proc.terminate()
-                proc.join()
-                log.warning("Spherical stitch exceeded the time budget; aborted")
+                # SIGKILL, not SIGTERM: the fork inherits uvicorn's asyncio signal handling, so a
+                # child that never re-armed its handlers could shrug off terminate() and the
+                # unbounded join would wedge this worker thread while holding the lock
+                proc.kill()
+                proc.join(5)
+                log.warning("Spherical stitch exceeded the time budget; killed")
                 return None
         finally:
             _spherical_input = None
@@ -394,11 +398,16 @@ def _spherical_child(conn: Any) -> None:
     # returns the outcome (encoded tuple, a PanoramaError, or None) over the pipe. A segfault/OOM
     # simply closes the pipe, which the parent reads as "no result".
     try:
+        # the fork inherits uvicorn's signal dispositions; restore defaults so the parent's
+        # kill/terminate escalation can actually stop a runaway child
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
+            signal.signal(sig, signal.SIG_DFL)
         assert _spherical_input is not None
         frames, options = _spherical_input
-        # the fork inherits the parent's cv2 thread-pool *state* but not its worker threads;
+        # the fork also inherits the parent's cv2 thread-pool *state* but not its worker threads;
         # explicitly reconfiguring the pool prevents dispatching work to threads that don't exist
-        cv2.setNumThreads(options.threads if options.threads > 0 else max(1, (os.cpu_count() or 2) - 1))
+        threads = options.threads or settings.pano_threads
+        cv2.setNumThreads(threads if threads > 0 else max(1, (os.cpu_count() or 2) - 1))
         conn.send(_stitch_spherical_impl(frames, options))
     except PanoramaError as err:
         conn.send(err)
@@ -526,12 +535,22 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
 
 def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
     """Stitch ordered frames into a panorama. Returns (jpeg bytes, width, height)."""
+    threads = options.threads or settings.pano_threads
+    if threads <= 0:
+        return _stitch(images, options)
+    # cv2's thread count is process-global; restore it afterwards so detect/OCR/transform requests
+    # running on other worker threads aren't permanently rescoped by one stitch's setting
+    previous = cv2.getNumThreads()
+    cv2.setNumThreads(threads)
+    try:
+        return _stitch(images, options)
+    finally:
+        cv2.setNumThreads(previous)
+
+
+def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
     if not 2 <= len(images) <= MAX_FRAMES:
         raise PanoramaError(400, f"Panorama stitching needs 2..{MAX_FRAMES} images, got {len(images)}")
-    if options.threads > 0:
-        # cv2's thread count is process-global; stitch jobs run one at a time (dedicated queue,
-        # concurrency 1) so scoping it per-request is safe in practice
-        cv2.setNumThreads(options.threads)
     # long chains inflate warp/blend buffers beyond what total input megapixels predict;
     # tighten the budget as frame count grows (measured: 13 frames at 400MP fits 6GB)
     budget = (
