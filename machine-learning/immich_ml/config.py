@@ -64,6 +64,7 @@ class Settings(BaseSettings):
     request_threads: int = os.cpu_count() or 4
     model_inter_op_threads: int = 0
     pano_threads: int = 0  # cv2 threads for panorama stitching; 0 = library default
+    pano_stitch_timeout: int = 780  # seconds before an isolated stitch subprocess is killed
     model_intra_op_threads: int = 0
     model_arena: bool = True
     ann: bool = True

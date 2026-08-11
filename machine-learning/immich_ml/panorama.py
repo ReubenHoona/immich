@@ -17,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from immich_ml.config import log
+from immich_ml.config import log, settings
 
 
 class PanoramaError(Exception):
@@ -394,19 +394,28 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     features = [features[i] for i in keep]
     matches = _match(features)
 
-    ok, cameras = cv2_.detail_HomographyBasedEstimator().apply(features, matches, None)
-    if not ok:
-        return None
-    for cam in cameras:
-        cam.R = cam.R.astype(np.float32)
+    def _bundle_adjust(conf_thresh: float) -> Any:
+        # fresh estimator state per attempt: bundle adjustment mutates the cameras in place
+        ok, cams = cv2_.detail_HomographyBasedEstimator().apply(features, matches, None)
+        if not ok:
+            return None
+        for cam in cams:
+            cam.R = cam.R.astype(np.float32)
+        adjuster = cv2_.detail_BundleAdjusterRay()
+        adjuster.setConfThresh(conf_thresh)
+        refine = np.zeros((3, 3), np.uint8)  # standard 5-param mask (fx, skew, ppx, aspect, ppy)
+        refine[0, 0] = refine[0, 1] = refine[0, 2] = refine[1, 1] = refine[1, 2] = 1
+        adjuster.setRefinementMask(refine)
+        ok, cams = adjuster.apply(features, matches, cams)
+        return cams if ok else None
 
-    adjuster = cv2_.detail_BundleAdjusterRay()
-    adjuster.setConfThresh(0.5)  # 0.3 keeps too-weak pairs and diverges; 0.5 is the stable floor
-    refine = np.zeros((3, 3), np.uint8)  # standard 5-param mask (fx, skew, ppx, aspect, ppy)
-    refine[0, 0] = refine[0, 1] = refine[0, 2] = refine[1, 1] = refine[1, 2] = 1
-    adjuster.setRefinementMask(refine)
-    ok, cameras = adjuster.apply(features, matches, cameras)
-    if not ok:
+    # 0.3 keeps too-weak pairs and diverges; 0.5 is the usual stable floor; 1.0 (strongest pairs
+    # only) rescues borderline hand-held sweeps where 0.5 fails to converge
+    cameras = _bundle_adjust(0.5)
+    if cameras is None:
+        log.info("Spherical stitch: bundle adjustment at conf 0.5 did not converge; retrying at 1.0")
+        cameras = _bundle_adjust(1.0)
+    if cameras is None:
         log.info("Spherical stitch: bundle adjustment did not converge")
         return None
 
@@ -526,13 +535,14 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
                 stderr=stderr_file,
                 cwd="/",
             )
+        timeout_s = settings.pano_stitch_timeout or STITCH_TIMEOUT_S
         try:
-            exit_code = proc.wait(STITCH_TIMEOUT_S)
+            exit_code = proc.wait(timeout_s)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(10)
-            log.warning(f"Stitch subprocess exceeded {STITCH_TIMEOUT_S}s; killed. Last output:\n{_tail(stderr_path)}")
-            raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget") from None
+            log.warning(f"Stitch subprocess exceeded {timeout_s}s; killed. Last output:\n{_tail(stderr_path)}")
+            raise PanoramaError(422, f"Stitch failed: exceeded the {timeout_s}s time budget") from None
 
         result_path = os.path.join(spool_dir, "result.json")
         if exit_code != 0 or not os.path.exists(result_path):
@@ -541,7 +551,9 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         with open(result_path) as result_file:
             result = json.load(result_file)
         if "status_code" in result:
+            log.debug(f"Stitch subprocess reported {result['status_code']}. Stage trace:\n{_tail(stderr_path)}")
             raise PanoramaError(result["status_code"], result["message"])
+        log.debug(f"Stitch subprocess trace:\n{_tail(stderr_path)}")
         with open(os.path.join(spool_dir, "result.bin"), "rb") as data_file:
             data = data_file.read()
         return data, int(result["width"]), int(result["height"])

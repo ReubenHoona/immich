@@ -48,6 +48,7 @@ def main() -> int:
     paths = sorted(glob.glob(f"{spool_dir}/*.bin"))
 
     try:
+        cv2.setRNGSeed(42)  # deterministic RANSAC/BA: the same input always converges the same way
         threads = options.threads or settings.pano_threads
         if threads > 0:
             cv2.setNumThreads(threads)
