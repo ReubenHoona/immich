@@ -219,10 +219,14 @@ async def panorama_stitch(
 ) -> Response:
     payloads = [await image.read() for image in images]
     try:
-        jpeg, width, height = await run(panorama.stitch, payloads, options)
+        jpeg, width, height, metrics = await run(panorama.stitch, payloads, options)
     except panorama.PanoramaError as e:
         raise HTTPException(e.status_code, e.message)
-    headers = {"X-Immich-Pano-Width": str(width), "X-Immich-Pano-Height": str(height)}
+    headers = {
+        "X-Immich-Pano-Width": str(width),
+        "X-Immich-Pano-Height": str(height),
+        "X-Immich-Pano-Metrics": orjson.dumps(metrics).decode(),
+    }
     return Response(content=jpeg, media_type="image/jpeg", headers=headers)
 
 

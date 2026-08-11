@@ -65,6 +65,9 @@ SPHERICAL_MAX_CANVAS_MP = 32.0  # compose-time canvas area budget (blender pyram
 SEAM_WORK_MP = 0.1  # per-frame resolution for graph-cut seam estimation (canonical two-scale seams)
 SPHERICAL_FIRST_FRAMES = 14  # chains this long are rotational sweeps; try the spherical pipeline first
 
+# (jpeg bytes, width, height, quality metrics)
+StitchOutput = tuple[bytes, int, int, dict[str, Any]]
+
 
 class LinkStats(TypedDict):
     matches: int
@@ -349,7 +352,32 @@ def _encode_pano(pano: NDArray[np.uint8], quality: int) -> tuple[bytes, int, int
     return encoded.tobytes(), width, height
 
 
-def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -> tuple[bytes, int, int] | None:
+def _overlap_metrics(
+    image_a: Any, mask_a: Any, corner_a: Any, image_b: Any, mask_b: Any, corner_b: Any
+) -> tuple[float, float] | None:
+    """Ghosting/exposure agreement of two warped neighbours over their overlap: mean |a-b| and the
+    signed brightness residual, both in grayscale levels. None when the overlap is too small."""
+    ax, ay = corner_a
+    bx, by = corner_b
+    x0 = max(ax, bx)
+    y0 = max(ay, by)
+    x1 = min(ax + image_a.shape[1], bx + image_b.shape[1])
+    y1 = min(ay + image_a.shape[0], by + image_b.shape[0])
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        return None
+    patch_a = image_a[y0 - ay : y1 - ay, x0 - ax : x1 - ax]
+    patch_b = image_b[y0 - by : y1 - by, x0 - bx : x1 - bx]
+    both = cv2.bitwise_and(mask_a[y0 - ay : y1 - ay, x0 - ax : x1 - ax], mask_b[y0 - by : y1 - by, x0 - bx : x1 - bx])
+    if int(cv2.countNonZero(both)) < 200:
+        return None
+    gray_a = cv2.cvtColor(patch_a, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    gray_b = cv2.cvtColor(patch_b, cv2.COLOR_BGR2GRAY).astype(np.float32)
+    selection = both > 0
+    difference = gray_a[selection] - gray_b[selection]
+    return float(np.abs(difference).mean()), float(difference.mean())
+
+
+def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -> StitchOutput | None:
     """Hugin-class spherical fallback for wide/360 rotational sweeps the high-level cv2.Stitcher
     cannot register (it fails camera-parameter adjustment). Pipeline: ORB features -> ordered range
     matcher -> ray bundle adjustment -> horizontal wave correction -> spherical warp -> gain
@@ -367,7 +395,7 @@ def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -
         return None
 
 
-def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptions) -> tuple[bytes, int, int] | None:
+def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptions) -> StitchOutput | None:
     # cv2's `detail_*` classes and PyRotationWarper are absent from the opencv type stubs; route
     # them through an Any alias so the stub gaps don't fail mypy (matching this module's loose-cv2 style).
     cv2_: Any = cv2
@@ -512,6 +540,21 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     # apply cleanly at compose scale (they are relative).
     compensator = cv2_.detail_BlocksChannelsCompensator()
     compensator.feed(seam_corners, seam_images, seam_masks)
+    # Quality metrics on the compensated seam-scale frames (all co-resident, nearly free):
+    # ghosting = mean |a-b| over each consecutive overlap — misregistration and parallax show up
+    # here; exposure residual = the signed brightness step compensation failed to remove.
+    for i in range(kept):
+        compensator.apply(i, seam_corners[i], seam_images[i], seam_masks[i])
+    overlap_errors: list[float] = []
+    exposure_residuals: list[float] = []
+    for i in range(kept - 1):
+        pair = _overlap_metrics(
+            seam_images[i], seam_masks[i], seam_corners[i],
+            seam_images[i + 1], seam_masks[i + 1], seam_corners[i + 1],
+        )
+        if pair is not None:
+            overlap_errors.append(pair[0])
+            exposure_residuals.append(pair[1])
     seam_finder = cv2_.detail_GraphCutSeamFinder("COST_COLOR")
     found = seam_finder.find([img.astype(np.float32) for img in seam_images], seam_corners, seam_masks)
     seam_masks = [f.get() if isinstance(f, cv2.UMat) else f for f in found]
@@ -554,11 +597,21 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     if filled < 0.80:
         raise PanoramaError(422, f"Stitch failed: spherical result only {filled:.0%} filled")
 
-    log.info(f"Spherical fallback stitched {kept}/{n} frames into {pano.shape[1]}x{pano.shape[0]}")
-    return _encode_pano(pano, options.quality)
+    metrics = {
+        "pipeline": "spherical",
+        "framesKept": kept,
+        "framesTotal": n,
+        "fill": round(filled, 3),
+        "overlapErrorMean": round(float(np.mean(overlap_errors)), 2) if overlap_errors else None,
+        "overlapErrorMax": round(float(np.max(overlap_errors)), 2) if overlap_errors else None,
+        "exposureResidualMean": round(float(np.mean(np.abs(exposure_residuals))), 2) if exposure_residuals else None,
+    }
+    log.info(f"Spherical fallback stitched {kept}/{n} frames into {pano.shape[1]}x{pano.shape[0]} ({metrics})")
+    data, width, height = _encode_pano(pano, options.quality)
+    return data, width, height, metrics
 
 
-def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
+def stitch(images: list[bytes], options: StitchOptions) -> StitchOutput:
     """Stitch ordered frames into a panorama in an isolated subprocess. Returns (jpeg, width, height).
 
     The whole pipeline runs in a *spawned* child: stitching can segfault or OOM on pathological
@@ -604,7 +657,7 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
         log.debug(f"Stitch subprocess trace:\n{_tail(stderr_path)}")
         with open(os.path.join(spool_dir, "result.bin"), "rb") as data_file:
             data = data_file.read()
-        return data, int(result["width"]), int(result["height"])
+        return data, int(result["width"]), int(result["height"]), result.get("metrics") or {}
 
 
 def _tail(path: str, max_bytes: int = 2000) -> str:
@@ -618,7 +671,7 @@ def _tail(path: str, max_bytes: int = 2000) -> str:
         return "(no output captured)"
 
 
-def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
+def _stitch(paths: list[str], options: StitchOptions) -> StitchOutput:
     if not 2 <= len(paths) <= MAX_FRAMES:
         raise PanoramaError(400, f"Panorama stitching needs 2..{MAX_FRAMES} images, got {len(paths)}")
     # long chains inflate warp/blend buffers beyond what total input megapixels predict;
@@ -695,7 +748,7 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
         # flat subjects photographed close up (documents, boards) violate the rotational
         # model but stitch cleanly with the affine SCANS pipeline
         status, pano = try_stitch(cv2.Stitcher_SCANS, 0.5)
-    def spherical_fallback_or_raise(planar_reason: str) -> tuple[bytes, int, int]:
+    def spherical_fallback_or_raise(planar_reason: str) -> StitchOutput:
         # Wide/360 rotational sweeps either fail the high-level stitcher's camera-parameter
         # adjustment (status 3) or slip through as a degenerate OK result; both recover with the
         # low-level spherical pipeline. Try it before surfacing the planar failure reason.
@@ -732,6 +785,7 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
         reason = f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)"
         pano = np.empty(0, dtype=np.uint8)  # a scattered-fragment canvas can be huge; free it first
         return spherical_fallback_or_raise(reason)
+    missing: list[int] = []
     if options.verifySources:
         missing = _verify_sources(frames, pano)
         if missing and len(frames) - len(missing) < max(2, len(frames) // 2):
@@ -743,4 +797,12 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
 
     height, width = pano.shape[:2]
     log.info(f"Stitched {len(paths)} frames into {width}x{height} panorama ({width * height / 1e6:.1f}MP)")
-    return _encode_pano(pano, options.quality)
+    data, out_width, out_height = _encode_pano(pano, options.quality)
+    metrics: dict[str, Any] = {
+        "pipeline": "planar",
+        "framesKept": len(frames) - len(missing),
+        "framesTotal": len(frames),
+        "fill": round(filled, 3),
+        "verifyMissing": len(missing),
+    }
+    return data, out_width, out_height, metrics

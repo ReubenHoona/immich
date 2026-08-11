@@ -85,7 +85,7 @@ def main() -> int:
         threads = options.threads or settings.pano_threads or _default_threads()
         if threads > 0:
             cv2.setNumThreads(threads)
-        data, width, height = panorama._stitch(paths, options)
+        data, width, height, metrics = panorama._stitch(paths, options)
     except panorama.PanoramaError as error:
         with open(f"{spool_dir}/result.json", "w") as result_file:
             json.dump({"status_code": error.status_code, "message": error.message}, result_file)
@@ -101,7 +101,7 @@ def main() -> int:
     with open(f"{spool_dir}/result.bin", "wb") as data_file:
         data_file.write(data)
     with open(f"{spool_dir}/result.json", "w") as result_file:
-        json.dump({"width": width, "height": height}, result_file)
+        json.dump({"width": width, "height": height, "metrics": metrics}, result_file)
     return 0
 
 

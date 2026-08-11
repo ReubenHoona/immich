@@ -121,14 +121,15 @@ class TestPanoramaDetect:
 class TestPanoramaStitch:
     def test_sweep_stitches_back_to_scene(self) -> None:
         scene = _textured_scene()
-        jpeg, width, height = stitch(_strips(scene), StitchOptions())
+        jpeg, width, height, metrics = stitch(_strips(scene), StitchOptions())
+        assert metrics["pipeline"] in ("planar", "spherical") and metrics["framesTotal"] == 3
         assert width == pytest.approx(scene.shape[1], rel=0.05)
         assert height == pytest.approx(scene.shape[0], rel=0.05)
         decoded = cv2.imdecode(np.frombuffer(jpeg, np.uint8), cv2.IMREAD_COLOR)
         assert decoded is not None and decoded.shape[1] == width
 
     def test_preview_resolution_downscales(self) -> None:
-        _, width, height = stitch(_strips(_textured_scene()), StitchOptions(compositeResolution="preview"))
+        _, width, height, _ = stitch(_strips(_textured_scene()), StitchOptions(compositeResolution="preview"))
         assert max(width, height) <= 1440 * 2.5  # panorama is wider than one frame, but bounded
 
     def test_unstitchable_input_raises_422(self) -> None:
@@ -142,14 +143,14 @@ class TestPanoramaStitch:
 
     def test_megapixel_budget_downscales_instead_of_failing(self) -> None:
         strips = _strips(_textured_scene())
-        _, full_width, _ = stitch(strips, StitchOptions())
-        _, small_width, _ = stitch(strips, StitchOptions(maxMegapixels=1.0))
+        _, full_width, _, _ = stitch(strips, StitchOptions())
+        _, small_width, _, _ = stitch(strips, StitchOptions(maxMegapixels=1.0))
         assert small_width < full_width
 
     def test_quality_affects_size(self) -> None:
         strips = _strips(_textured_scene())
-        hi, _, _ = stitch(strips, StitchOptions(quality=97))
-        lo, _, _ = stitch(strips, StitchOptions(quality=60))
+        hi, _, _, _ = stitch(strips, StitchOptions(quality=97))
+        lo, _, _, _ = stitch(strips, StitchOptions(quality=60))
         assert len(hi) > len(lo)
 
 
@@ -160,7 +161,7 @@ class TestStitchIsolation:
         # crashed worker. Rotational synthetic frames exercise the spherical pipeline.
         frames = [_encode(f) for f in _rotated_views(_textured_scene(width=1200, height=800), count=5, deg_step=7.0)]
         try:
-            data, width, height = stitch(frames, StitchOptions(compositeResolution="preview"))
+            data, width, height, _ = stitch(frames, StitchOptions(compositeResolution="preview"))
             assert width > 0 and height > 0 and len(data) > 0
         except PanoramaError as err:
             assert err.status_code in (422, 500)
