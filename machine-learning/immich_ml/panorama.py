@@ -5,8 +5,10 @@ Exposed through dedicated endpoints in main.py (the /predict pipeline is single-
 All functions here are synchronous and CPU-bound; callers run them in the thread pool.
 """
 
+import logging
 import multiprocessing as mp
 import os
+import resource
 import signal
 import tempfile
 from typing import Any, Literal, TypedDict, cast
@@ -383,6 +385,7 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
         matcher.collectGarbage()
         return pairwise
 
+    log.debug(f"Spherical: features computed for {len(reg)} frames")
     matches = _match(features)
     keep = [int(i) for i in np.asarray(cv2.detail.leaveBiggestComponent(features, matches, 0.3)).flatten()]
     if len(keep) < 3:
@@ -436,6 +439,8 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
         log.info(f"Spherical canvas would be {full_canvas_mp:.0f}MP at full scale; clamping compose to fit")
         compose_factor = canvas_factor
 
+    canvas_estimate = full_canvas_mp * compose_factor**2
+    log.debug(f"Spherical: composing at factor {compose_factor:.2f} (canvas est {canvas_estimate:.0f}MP)")
     warper = cv2_.PyRotationWarper("spherical", warped_scale * compose_factor)
 
     corners: list[Any] = []
@@ -540,15 +545,40 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     return cast("tuple[bytes, int, int]", outcome)
 
 
+def _cgroup_memory_limit() -> int | None:
+    try:
+        raw = open("/sys/fs/cgroup/memory.max").read().strip()
+        return None if raw == "max" else int(raw)
+    except (OSError, ValueError):
+        return None
+
+
 def _stitch_child(conn: Any, paths: list[str], options: StitchOptions) -> None:
     # Entry point of the spawned stitch process: fresh interpreter, no inherited locks or heap.
     try:
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
             signal.signal(sig, signal.SIG_DFL)
+        # child stdout/stderr don't reliably surface under gunicorn; log stages to a file so a
+        # SIGKILL'd stitch leaves evidence of where it died
+        handler = logging.FileHandler("/tmp/immich-stitch-child.log")
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logging.getLogger("immich_ml").addHandler(handler)
+        logging.getLogger("immich_ml").setLevel(logging.DEBUG)
+        # keep this process's allocations below the container limit (minus headroom for the
+        # worker) so exhaustion raises a catchable error instead of a cgroup SIGKILL that takes
+        # out whichever process the kernel picks
+        cgroup_limit = _cgroup_memory_limit()
+        if cgroup_limit is not None:
+            child_cap = max(cgroup_limit - 1536 * 1024 * 1024, cgroup_limit // 2)
+            resource.setrlimit(resource.RLIMIT_AS, (child_cap, child_cap))
+            log.debug(f"Stitch child capped at {child_cap / 1073741824:.1f}GB of address space")
         threads = options.threads or settings.pano_threads
         if threads > 0:
             cv2.setNumThreads(threads)
         conn.send(_stitch(paths, options))
+    except MemoryError:
+        log.warning("Stitch subprocess ran out of memory")
+        conn.send(PanoramaError(422, "Stitch failed: out of memory (lower the megapixel budget)"))
     except PanoramaError as err:
         conn.send(err)
     except Exception as err:
@@ -593,6 +623,7 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
                 ),
             )
         frames.append(frame)
+    log.debug(f"Stitch child: decoded {len(frames)} frames, {total_megapixels:.0f}MP input")
     if total_megapixels > budget:
         log.info(
             f"Panorama input of {total_megapixels:.0f}MP exceeds {budget:.0f}MP budget, "
@@ -628,6 +659,7 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
             return spherical
         log.info("Spherical-first stitch found no coherent sweep; trying the planar pipeline")
 
+    log.debug(f"Planar: attempting cv2.Stitcher on {len(frames)} frames")
     status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.6)
     if status != cv2.Stitcher_OK:
         status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.4)
