@@ -6,7 +6,9 @@ All functions here are synchronous and CPU-bound; callers run them in the thread
 """
 
 import multiprocessing as mp
+import os
 import signal
+import tempfile
 from typing import Any, Literal, TypedDict, cast
 
 import cv2
@@ -24,6 +26,11 @@ class PanoramaError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.message = message
+
+    def __reduce__(self) -> tuple[Any, tuple[int, str]]:
+        # default Exception pickling replays only super().__init__(message); both args are needed
+        # for the error to survive the trip back from the stitch subprocess
+        return (PanoramaError, (self.status_code, self.message))
 
 
 class DetectOptions(BaseModel):
@@ -498,25 +505,33 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     in-process both risked the worker and left gigabytes of freed-but-retained heap behind after
     every job. Spawn (not fork) because forking a threaded gunicorn/uvicorn worker can deadlock the
     child on locks held by other threads at fork time — observed as a stitch hanging to its
-    timeout. Any crash or timeout surfaces as a clean 422."""
+    timeout. Payloads travel via a spool directory, not process args: pickling hundreds of MB
+    through the spawn bootstrap pipe wedges both ends. Any crash or timeout surfaces as a clean 422."""
     ctx = mp.get_context("spawn")
-    parent_conn, child_conn = ctx.Pipe(duplex=False)
-    proc = ctx.Process(target=_stitch_child, args=(child_conn, images, options), daemon=True)
-    proc.start()
-    child_conn.close()  # only the child keeps the send end
-    outcome: Any = None
-    produced = parent_conn.poll(STITCH_TIMEOUT_S)
-    if produced:
-        try:
-            outcome = parent_conn.recv()
-        except EOFError:  # child died (segfault/OOM) before sending
-            produced = False
-    parent_conn.close()
-    proc.join(5)
-    if proc.is_alive():
-        proc.kill()
+    with tempfile.TemporaryDirectory(prefix="immich-stitch-") as spool_dir:
+        paths: list[str] = []
+        for index, image in enumerate(images):
+            path = os.path.join(spool_dir, f"{index:03}.bin")
+            with open(path, "wb") as spool_file:
+                spool_file.write(image)
+            paths.append(path)
+        parent_conn, child_conn = ctx.Pipe(duplex=False)
+        proc = ctx.Process(target=_stitch_child, args=(child_conn, paths, options), daemon=True)
+        proc.start()
+        child_conn.close()  # only the child keeps the send end
+        outcome: Any = None
+        produced = parent_conn.poll(STITCH_TIMEOUT_S)
+        if produced:
+            try:
+                outcome = parent_conn.recv()
+            except EOFError:  # child died (segfault/OOM) before sending
+                produced = False
+        parent_conn.close()
         proc.join(5)
-        raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget")
+        if proc.is_alive():
+            proc.kill()
+            proc.join(5)
+            raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget")
     if not produced:
         log.warning(f"Stitch subprocess died without a result (exit {proc.exitcode}) — likely out of memory")
         raise PanoramaError(422, "Stitch failed: worker crashed (likely out of memory; lower the megapixel budget)")
@@ -525,7 +540,7 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     return cast("tuple[bytes, int, int]", outcome)
 
 
-def _stitch_child(conn: Any, images: list[bytes], options: StitchOptions) -> None:
+def _stitch_child(conn: Any, paths: list[str], options: StitchOptions) -> None:
     # Entry point of the spawned stitch process: fresh interpreter, no inherited locks or heap.
     try:
         for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
@@ -533,7 +548,7 @@ def _stitch_child(conn: Any, images: list[bytes], options: StitchOptions) -> Non
         threads = options.threads or settings.pano_threads
         if threads > 0:
             cv2.setNumThreads(threads)
-        conn.send(_stitch(images, options))
+        conn.send(_stitch(paths, options))
     except PanoramaError as err:
         conn.send(err)
     except Exception as err:
@@ -543,28 +558,26 @@ def _stitch_child(conn: Any, images: list[bytes], options: StitchOptions) -> Non
         conn.close()
 
 
-def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
-    if not 2 <= len(images) <= MAX_FRAMES:
-        raise PanoramaError(400, f"Panorama stitching needs 2..{MAX_FRAMES} images, got {len(images)}")
+def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
+    if not 2 <= len(paths) <= MAX_FRAMES:
+        raise PanoramaError(400, f"Panorama stitching needs 2..{MAX_FRAMES} images, got {len(paths)}")
     # long chains inflate warp/blend buffers beyond what total input megapixels predict;
     # tighten the budget as frame count grows (measured: 13 frames at 400MP fits 6GB)
     budget = (
-        min(options.maxMegapixels, options.maxMegapixels * 13.0 / len(images))
-        if len(images) > 13
+        min(options.maxMegapixels, options.maxMegapixels * 13.0 / len(paths))
+        if len(paths) > 13
         else options.maxMegapixels
     )
-    # Decode -> scale -> free one frame at a time. Holding every full-res frame before scaling
-    # (a 20x50MP sweep is ~3GB of BGR) doubled the peak and could OOM-kill the worker; per-frame
-    # capping keeps the peak to one full-res frame plus the scaled set. An equal per-frame share
-    # of the budget matches proportional scaling for the common same-resolution burst.
-    allowance = budget / len(images)
+    # Read -> decode -> scale -> free one frame at a time from the spool: only a single compressed
+    # payload and one full-res frame are ever resident alongside the accumulating capped set.
+    # An equal per-frame share of the budget matches proportional scaling for the common
+    # same-resolution burst.
+    allowance = budget / len(paths)
     frames: list[NDArray[np.uint8]] = []
     total_megapixels = 0.0
-    for index, image in enumerate(images):
-        frame = _decode(image)
-        # release each compressed payload as its frame is produced; a 20-frame sweep of originals
-        # is ~300MB of JPEG bytes that would otherwise stay resident for the whole stitch
-        images[index] = b""
+    for path in paths:
+        with open(path, "rb") as payload_file:
+            frame = _decode(payload_file.read())
         if options.compositeResolution == "preview":
             frame = _downscale(frame, PREVIEW_MAX_DIM)
         megapixels = frame.shape[0] * frame.shape[1] / 1e6
@@ -674,5 +687,5 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
             log.warning(f"Partial panorama: {len(missing)} of {len(frames)} frames not in the result ({missing})")
 
     height, width = pano.shape[:2]
-    log.info(f"Stitched {len(images)} frames into {width}x{height} panorama ({width * height / 1e6:.1f}MP)")
+    log.info(f"Stitched {len(paths)} frames into {width}x{height} panorama ({width * height / 1e6:.1f}MP)")
     return _encode_pano(pano, options.quality)
