@@ -460,79 +460,84 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     log.debug(f"Spherical: compose factor {compose_factor:.2f} of full frames (canvas est {canvas_estimate:.0f}MP)")
     warper = cv2_.PyRotationWarper("spherical", warped_scale * frame_scale * compose_factor)
 
+    # Pass 1 — compose-scale geometry only (warpRoi allocates nothing): per-frame degeneracy guard,
+    # the real canvas check, and the corner/size lists the blender needs up front.
     corners: list[Any] = []
     sizes: list[tuple[int, int]] = []
-    images_warped: list[Any] = []
-    masks_warped: list[Any] = []
+    compose_ks: list[Any] = []
     for i, im in enumerate(frames):
-        if compose_factor < 1.0:
-            im = cast(
-                NDArray[np.uint8],
-                cv2.resize(im, None, fx=compose_factor, fy=compose_factor, interpolation=cv2.INTER_AREA),
-            )
         K = cameras[i].K().astype(np.float32)
         K[:2, :] *= frame_scale * compose_factor
-        expect_w, expect_h = im.shape[1], im.shape[0]
+        compose_ks.append(K)
+        expect_w = max(1, int(im.shape[1] * compose_factor))
+        expect_h = max(1, int(im.shape[0] * compose_factor))
         roi = warper.warpRoi((expect_w, expect_h), K, cameras[i].R)
         if roi[2] * roi[3] > 16 * expect_w * expect_h:
             # a near-pole or wrapped frame can explode to an absurd warped extent; treat the
             # registration as degenerate rather than allocating it
             log.info(f"Spherical stitch: frame {i} warps to {roi[2]}x{roi[3]}; registration degenerate")
             return None
-        corner, image_wp = warper.warp(im, K, cameras[i].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
-        _, mask_wp = warper.warp(
-            255 * np.ones(im.shape[:2], np.uint8), K, cameras[i].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT
-        )
-        corners.append(corner)
-        sizes.append((image_wp.shape[1], image_wp.shape[0]))
-        images_warped.append(image_wp)
-        masks_warped.append(mask_wp)
-
-    # per-channel block gains: phone sweeps change exposure AND white balance frame to frame; a
-    # single luminance gain leaves visible colour steps at seams
-    compensator = cv2_.detail_BlocksChannelsCompensator()
-    compensator.feed(corners, images_warped, masks_warped)
-    for i in range(kept):
-        compensator.apply(i, corners[i], images_warped[i], masks_warped[i])
-
-    # Graph-cut seams routed through low-contrast regions hide misregistration far better than
-    # Voronoi midlines, and computing them at a reduced seam scale (the canonical two-scale
-    # approach) keeps the cost trivial; the seam masks are then upscaled to compose resolution.
-    total_warp_area = float(sum(w * h for (w, h) in sizes))
-    seam_factor = min(1.0, (SEAM_WORK_MP * 1e6 * kept / max(total_warp_area, 1.0)) ** 0.5)
-    seam_images = [
-        cv2.resize(img, None, fx=seam_factor, fy=seam_factor, interpolation=cv2.INTER_AREA).astype(np.float32)
-        for img in images_warped
-    ]
-    seam_masks_small = [
-        cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
-        for mask, img in zip(masks_warped, seam_images)
-    ]
-    seam_corners = [(int(x * seam_factor), int(y * seam_factor)) for (x, y) in corners]
-    seam_finder = cv2_.detail_GraphCutSeamFinder("COST_COLOR")
-    found = seam_finder.find(seam_images, seam_corners, seam_masks_small)
-    masks_seam = []
-    for i in range(kept):
-        small = found[i].get() if isinstance(found[i], cv2.UMat) else found[i]
-        full = cv2.resize(small, (sizes[i][0], sizes[i][1]), interpolation=cv2.INTER_NEAREST)
-        # dilate a little so upscaling rounding cannot open gaps, then confine to the warped area
-        full = cv2.dilate(full, np.ones((3, 3), np.uint8))
-        masks_seam.append(cv2.bitwise_and(full, masks_warped[i]))
-
-    blender = cv2_.detail_MultiBandBlender()
+        corners.append((roi[0], roi[1]))
+        sizes.append((roi[2], roi[3]))
     dst_sz = cv2.detail.resultRoi(corners, sizes)
-    # The probe estimates the footprint from warpRoi, but spherical wrap-around cases can make the
-    # REAL canvas diverge wildly from the estimate (observed as a 33GB allocation). Bind the actual
-    # allocation, not the prediction.
     actual_canvas_mp = dst_sz[2] * dst_sz[3] / 1e6
-    if actual_canvas_mp > 2.0 * canvas_budget_mp:
+    if actual_canvas_mp > 1.5 * canvas_budget_mp:
+        # warpRoi estimates can diverge from the union on wrap-around registrations (observed as a
+        # 33GB allocation pre-guard); bind the real canvas, not the prediction
         log.info(f"Spherical stitch: actual canvas {actual_canvas_mp:.0f}MP breaches budget; registration degenerate")
         return None
+
+    # Pass 2 — seam-scale everything (canonical two-scale): warp small copies, feed the exposure
+    # compensator and graph-cut seams entirely at ~SEAM_WORK_MP per frame. Cheap and tiny.
+    seam_factor = min(1.0, (SEAM_WORK_MP * 1e6 / max(sizes[0][0] * sizes[0][1], 1)) ** 0.5)
+    seam_warper = cv2_.PyRotationWarper("spherical", warped_scale * frame_scale * compose_factor * seam_factor)
+    seam_images: list[Any] = []
+    seam_masks: list[Any] = []
+    seam_corners: list[Any] = []
+    for i, im in enumerate(frames):
+        f = compose_factor * seam_factor
+        small = cv2.resize(im, None, fx=f, fy=f, interpolation=cv2.INTER_AREA)
+        K = cameras[i].K().astype(np.float32)
+        K[:2, :] *= frame_scale * compose_factor * seam_factor
+        corner, img_wp = seam_warper.warp(small, K, cameras[i].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
+        _, mask_wp = seam_warper.warp(
+            255 * np.ones(small.shape[:2], np.uint8), K, cameras[i].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT
+        )
+        seam_corners.append(corner)
+        seam_images.append(img_wp)
+        seam_masks.append(mask_wp)
+
+    # per-channel block gains: phone sweeps change exposure AND white balance frame to frame; a
+    # single luminance gain leaves visible colour steps at seams. Gain maps learned at seam scale
+    # apply cleanly at compose scale (they are relative).
+    compensator = cv2_.detail_BlocksChannelsCompensator()
+    compensator.feed(seam_corners, seam_images, seam_masks)
+    seam_finder = cv2_.detail_GraphCutSeamFinder("COST_COLOR")
+    found = seam_finder.find([img.astype(np.float32) for img in seam_images], seam_corners, seam_masks)
+    seam_masks = [f.get() if isinstance(f, cv2.UMat) else f for f in found]
+    seam_images = []  # only the seam masks are needed from here on
+
+    # Pass 3 — compose: warp each full frame, compensate, blend, and free it before the next one;
+    # peak memory is a single warped frame plus the blender pyramids.
+    blender = cv2_.detail_MultiBandBlender()
     blend_width = float(np.sqrt(dst_sz[2] * dst_sz[3]) * 0.05)
     blender.setNumBands(max(1, int(np.log2(blend_width)) - 1) if blend_width > 1 else 1)
     blender.prepare(dst_sz)
-    for i in range(kept):
-        blender.feed(cv2_.UMat(images_warped[i].astype(np.int16)), masks_seam[i], corners[i])
+    for i, im in enumerate(frames):
+        if compose_factor < 1.0:
+            im = cast(
+                NDArray[np.uint8],
+                cv2.resize(im, None, fx=compose_factor, fy=compose_factor, interpolation=cv2.INTER_AREA),
+            )
+        corner, img_wp = warper.warp(im, compose_ks[i], cameras[i].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
+        _, mask_wp = warper.warp(
+            255 * np.ones(im.shape[:2], np.uint8), compose_ks[i], cameras[i].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT
+        )
+        compensator.apply(i, corner, img_wp, mask_wp)
+        seam_full = cv2.resize(seam_masks[i], (img_wp.shape[1], img_wp.shape[0]), interpolation=cv2.INTER_NEAREST)
+        seam_full = cv2.dilate(seam_full, np.ones((3, 3), np.uint8))
+        seam_full = cv2.bitwise_and(seam_full, mask_wp)
+        blender.feed(cv2_.UMat(img_wp.astype(np.int16)), seam_full, corner)
     result, _ = blender.blend(None, None)
     pano = cast(NDArray[np.uint8], cv2.convertScaleAbs(result))
 

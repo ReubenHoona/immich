@@ -14,11 +14,19 @@ inspectable even when this process is killed."""
 
 import json
 import logging
+import os
 import resource
 import sys
 
 
 def _cap_address_space() -> None:
+    override_mb = os.environ.get("MACHINE_LEARNING_PANO_MEMORY_MB", "").strip()
+    if override_mb.isdigit() and int(override_mb) > 0:
+        # operator override: hard heap budget for the stitch process, independent of cgroup detection
+        cap = int(override_mb) * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
+        resource.setrlimit(resource.RLIMIT_AS, (cap * 4, cap * 4))
+        return
     try:
         raw = open("/sys/fs/cgroup/memory.max").read().strip()
         limit = None if raw == "max" else int(raw)
@@ -37,7 +45,23 @@ def _cap_address_space() -> None:
             cap = min(total_kb * 1024 // 3, 8 * 1024 * 1024 * 1024)
         except (OSError, ValueError, StopIteration):
             cap = 8 * 1024 * 1024 * 1024
-    resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+    # RLIMIT_DATA tracks the heap (what the runaway actually consumes); RLIMIT_AS counts virtual
+    # reservations, which run several times higher than resident use under threaded cv2/numpy and
+    # strangle legitimate work. Keep AS as a loose outer net at 4x.
+    resource.setrlimit(resource.RLIMIT_DATA, (cap, cap))
+    resource.setrlimit(resource.RLIMIT_AS, (cap * 4, cap * 4))
+
+
+def _default_threads() -> int:
+    # cv2 sizes its pool from host CPUs, but a container CPU quota can be far lower; honour the
+    # cgroup quota so the stitch doesn't oversubscribe (and allocate arenas for) phantom cores
+    try:
+        quota_raw, period_raw = open("/sys/fs/cgroup/cpu.max").read().split()
+        if quota_raw != "max":
+            return max(1, int(quota_raw) // int(period_raw))
+    except (OSError, ValueError):
+        pass
+    return 0  # let cv2 use its default
 
 
 def main() -> int:
@@ -58,7 +82,7 @@ def main() -> int:
 
     try:
         cv2.setRNGSeed(42)  # deterministic RANSAC/BA: the same input always converges the same way
-        threads = options.threads or settings.pano_threads
+        threads = options.threads or settings.pano_threads or _default_threads()
         if threads > 0:
             cv2.setNumThreads(threads)
         data, width, height = panorama._stitch(paths, options)
