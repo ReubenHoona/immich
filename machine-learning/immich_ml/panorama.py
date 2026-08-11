@@ -62,6 +62,7 @@ SPHERICAL_REGISTER_DIM = 1600  # feature/registration resolution for the spheric
 SPHERICAL_RANGE_WIDTH = 5  # match each frame to +/- this many ordered neighbours
 STITCH_TIMEOUT_S = 780  # hard cap on the isolated stitch subprocess (the server aborts at 840s)
 SPHERICAL_MAX_CANVAS_MP = 32.0  # compose-time canvas area budget (blender pyramids scale with it)
+SEAM_WORK_MP = 0.1  # per-frame resolution for graph-cut seam estimation (canonical two-scale seams)
 SPHERICAL_FIRST_FRAMES = 14  # chains this long are rotational sweeps; try the spherical pipeline first
 
 
@@ -372,7 +373,9 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     cv2_: Any = cv2
     n = len(frames)
     reg = [_downscale(f, SPHERICAL_REGISTER_DIM) for f in frames]
-    finder = cv2.ORB.create(nfeatures=3000)
+    # SIFT registers noticeably stronger pairwise chains than ORB on misty/low-texture sweeps and
+    # the cost is bounded by the registration resolution
+    finder = cv2.SIFT.create()
     features = [cv2.detail.computeImageFeatures2(finder, im) for im in reg]
 
     def _match(feats: list[Any]) -> Any:
@@ -390,6 +393,7 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     if len(keep) < 3:
         log.info(f"Spherical stitch: only {len(keep)} of {n} frames connected; not a coherent sweep")
         return None
+    frames = [frames[i] for i in keep]
     reg = [reg[i] for i in keep]
     features = [features[i] for i in keep]
     matches = _match(features)
@@ -409,12 +413,14 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
         ok, cams = adjuster.apply(features, matches, cams)
         return cams if ok else None
 
-    # 0.3 keeps too-weak pairs and diverges; 0.5 is the usual stable floor; 1.0 (strongest pairs
-    # only) rescues borderline hand-held sweeps where 0.5 fails to converge
-    cameras = _bundle_adjust(0.5)
+    # 0.3 keeps too-weak pairs and diverges. Long chains converge most reliably on the
+    # strongest-pairs graph (conf 1.0), so try that first for them; short chains keep the usual
+    # 0.5 floor first. The other threshold remains as the retry.
+    ladder = (1.0, 0.5) if n >= SPHERICAL_FIRST_FRAMES else (0.5, 1.0)
+    cameras = _bundle_adjust(ladder[0])
     if cameras is None:
-        log.info("Spherical stitch: bundle adjustment at conf 0.5 did not converge; retrying at 1.0")
-        cameras = _bundle_adjust(1.0)
+        log.info(f"Spherical stitch: bundle adjustment at conf {ladder[0]} did not converge; retrying at {ladder[1]}")
+        cameras = _bundle_adjust(ladder[1])
     if cameras is None:
         log.info("Spherical stitch: bundle adjustment did not converge")
         return None
@@ -426,46 +432,53 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     warped_scale = float(np.median(sorted(cam.focal for cam in cameras)))
 
     kept = len(reg)
-    compose_cap = 1400 if kept <= 8 else 1100 if kept <= 16 else 900 if kept <= 24 else 720
+    # True two-scale compose: the camera model was estimated in registration-pixel units, but the
+    # composite warps the full budget-capped frames — frame_scale lifts K and the warp radius to
+    # full-frame units so output resolution is governed by the megapixel budget, not the
+    # registration size. The canvas area budget rides the admin maxMegapixels setting.
+    frame_scale = max(frames[0].shape[:2]) / max(reg[0].shape[:2])
+    canvas_budget_mp = min(128.0, max(16.0, options.maxMegapixels / 4.0))
     if options.compositeResolution == "preview":
-        compose_cap = min(compose_cap, PREVIEW_MAX_DIM // 2)
-    compose_factor = min(1.0, compose_cap / max(reg[0].shape[:2]))
+        canvas_budget_mp = min(canvas_budget_mp, 8.0)
 
     # Probe the projected footprint before allocating anything: a drifted registration can imply a
     # canvas of hundreds of megapixels, and the multi-band blender allocates pyramids across all of
     # it — enough to breach the container memory limit. Clamp the compose scale to the area budget.
-    probe = cv2_.PyRotationWarper("spherical", warped_scale)
+    probe = cv2_.PyRotationWarper("spherical", warped_scale * frame_scale)
     x0 = y0 = np.inf
     x1 = y1 = -np.inf
-    for i, im in enumerate(reg):
-        rx, ry, rw, rh = probe.warpRoi((im.shape[1], im.shape[0]), cameras[i].K().astype(np.float32), cameras[i].R)
+    for i, im in enumerate(frames):
+        K = cameras[i].K().astype(np.float32)
+        K[:2, :] *= frame_scale
+        rx, ry, rw, rh = probe.warpRoi((im.shape[1], im.shape[0]), K, cameras[i].R)
         x0, y0 = min(x0, rx), min(y0, ry)
         x1, y1 = max(x1, rx + rw), max(y1, ry + rh)
     full_canvas_mp = max(1.0, (x1 - x0) * (y1 - y0) / 1e6)
-    canvas_factor = (SPHERICAL_MAX_CANVAS_MP / full_canvas_mp) ** 0.5
-    if canvas_factor < compose_factor:
-        log.info(f"Spherical canvas would be {full_canvas_mp:.0f}MP at full scale; clamping compose to fit")
-        compose_factor = canvas_factor
+    compose_factor = min(1.0, (canvas_budget_mp / full_canvas_mp) ** 0.5)
 
     canvas_estimate = full_canvas_mp * compose_factor**2
-    log.debug(f"Spherical: composing at factor {compose_factor:.2f} (canvas est {canvas_estimate:.0f}MP)")
-    warper = cv2_.PyRotationWarper("spherical", warped_scale * compose_factor)
+    log.debug(f"Spherical: compose factor {compose_factor:.2f} of full frames (canvas est {canvas_estimate:.0f}MP)")
+    warper = cv2_.PyRotationWarper("spherical", warped_scale * frame_scale * compose_factor)
 
     corners: list[Any] = []
     sizes: list[tuple[int, int]] = []
     images_warped: list[Any] = []
     masks_warped: list[Any] = []
-    for i, im in enumerate(reg):
+    for i, im in enumerate(frames):
         if compose_factor < 1.0:
             im = cast(
                 NDArray[np.uint8],
                 cv2.resize(im, None, fx=compose_factor, fy=compose_factor, interpolation=cv2.INTER_AREA),
             )
         K = cameras[i].K().astype(np.float32)
-        K[0, 0] *= compose_factor
-        K[0, 2] *= compose_factor
-        K[1, 1] *= compose_factor
-        K[1, 2] *= compose_factor
+        K[:2, :] *= frame_scale * compose_factor
+        expect_w, expect_h = im.shape[1], im.shape[0]
+        roi = warper.warpRoi((expect_w, expect_h), K, cameras[i].R)
+        if roi[2] * roi[3] > 16 * expect_w * expect_h:
+            # a near-pole or wrapped frame can explode to an absurd warped extent; treat the
+            # registration as degenerate rather than allocating it
+            log.info(f"Spherical stitch: frame {i} warps to {roi[2]}x{roi[3]}; registration degenerate")
+            return None
         corner, image_wp = warper.warp(im, K, cameras[i].R, cv2.INTER_LINEAR, cv2.BORDER_REFLECT)
         _, mask_wp = warper.warp(
             255 * np.ones(im.shape[:2], np.uint8), K, cameras[i].R, cv2.INTER_NEAREST, cv2.BORDER_CONSTANT
@@ -475,16 +488,46 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
         images_warped.append(image_wp)
         masks_warped.append(mask_wp)
 
-    compensator = cv2_.detail_BlocksGainCompensator()
+    # per-channel block gains: phone sweeps change exposure AND white balance frame to frame; a
+    # single luminance gain leaves visible colour steps at seams
+    compensator = cv2_.detail_BlocksChannelsCompensator()
     compensator.feed(corners, images_warped, masks_warped)
     for i in range(kept):
         compensator.apply(i, corners[i], images_warped[i], masks_warped[i])
 
-    seam_finder = cv2_.detail_VoronoiSeamFinder()  # fast; DpSeamFinder is O(minutes) on long chains
-    masks_seam = seam_finder.find([img.astype(np.float32) for img in images_warped], corners, masks_warped)
+    # Graph-cut seams routed through low-contrast regions hide misregistration far better than
+    # Voronoi midlines, and computing them at a reduced seam scale (the canonical two-scale
+    # approach) keeps the cost trivial; the seam masks are then upscaled to compose resolution.
+    total_warp_area = float(sum(w * h for (w, h) in sizes))
+    seam_factor = min(1.0, (SEAM_WORK_MP * 1e6 * kept / max(total_warp_area, 1.0)) ** 0.5)
+    seam_images = [
+        cv2.resize(img, None, fx=seam_factor, fy=seam_factor, interpolation=cv2.INTER_AREA).astype(np.float32)
+        for img in images_warped
+    ]
+    seam_masks_small = [
+        cv2.resize(mask, (img.shape[1], img.shape[0]), interpolation=cv2.INTER_NEAREST)
+        for mask, img in zip(masks_warped, seam_images)
+    ]
+    seam_corners = [(int(x * seam_factor), int(y * seam_factor)) for (x, y) in corners]
+    seam_finder = cv2_.detail_GraphCutSeamFinder("COST_COLOR")
+    found = seam_finder.find(seam_images, seam_corners, seam_masks_small)
+    masks_seam = []
+    for i in range(kept):
+        small = found[i].get() if isinstance(found[i], cv2.UMat) else found[i]
+        full = cv2.resize(small, (sizes[i][0], sizes[i][1]), interpolation=cv2.INTER_NEAREST)
+        # dilate a little so upscaling rounding cannot open gaps, then confine to the warped area
+        full = cv2.dilate(full, np.ones((3, 3), np.uint8))
+        masks_seam.append(cv2.bitwise_and(full, masks_warped[i]))
 
     blender = cv2_.detail_MultiBandBlender()
     dst_sz = cv2.detail.resultRoi(corners, sizes)
+    # The probe estimates the footprint from warpRoi, but spherical wrap-around cases can make the
+    # REAL canvas diverge wildly from the estimate (observed as a 33GB allocation). Bind the actual
+    # allocation, not the prediction.
+    actual_canvas_mp = dst_sz[2] * dst_sz[3] / 1e6
+    if actual_canvas_mp > 2.0 * canvas_budget_mp:
+        log.info(f"Spherical stitch: actual canvas {actual_canvas_mp:.0f}MP breaches budget; registration degenerate")
+        return None
     blend_width = float(np.sqrt(dst_sz[2] * dst_sz[3]) * 0.05)
     blender.setNumBands(max(1, int(np.log2(blend_width)) - 1) if blend_width > 1 else 1)
     blender.prepare(dst_sz)
@@ -630,13 +673,11 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
         # both slow (minutes of registration) and memory-hazardous (a divergent registration can
         # imply a multi-gigabyte compose canvas before cv2's own size check throws), so run the
         # spherical pipeline first and keep planar as the second opinion.
-        registration = [_downscale(frame, SPHERICAL_REGISTER_DIM) for frame in frames]
         try:
-            spherical = _stitch_spherical(registration, options)
+            spherical = _stitch_spherical(frames, options)
         except cv2.error as error:
             log.warning(f"Spherical-first stitch raised: {str(error).splitlines()[-1][:120]}")
             spherical = None
-        del registration
         if spherical is not None:
             return spherical
         log.info("Spherical-first stitch found no coherent sweep; trying the planar pipeline")
@@ -654,13 +695,8 @@ def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
         # adjustment (status 3) or slip through as a degenerate OK result; both recover with the
         # low-level spherical pipeline. Try it before surfacing the planar failure reason.
         if options.sphericalFallback and not spherical_first and len(frames) >= 3:
-            # hand the forked child only registration-size copies and free the budget-capped frames
-            # first — the cgroup memory limit counts parent and child together, and the planar
-            # working set plus a second pipeline was enough to OOM-kill the worker
-            registration = [_downscale(frame, SPHERICAL_REGISTER_DIM) for frame in frames]
-            frames.clear()
             try:
-                spherical = _stitch_spherical(registration, options)
+                spherical = _stitch_spherical(frames, options)
             except cv2.error as error:
                 log.warning(f"Spherical fallback raised: {str(error).splitlines()[-1][:120]}")
                 spherical = None

@@ -28,7 +28,16 @@ def _cap_address_space() -> None:
         # leave headroom for the gunicorn worker sharing the cgroup; exhaustion then raises
         # MemoryError here instead of the kernel OOM-killing an arbitrary cgroup member
         cap = max(limit - 1536 * 1024 * 1024, limit // 2)
-        resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
+    else:
+        # no cgroup limit: never run uncapped — a runaway compose once ballooned to 33GB RSS and
+        # took down the whole host. Default to a third of system memory, at most 8GB.
+        try:
+            with open("/proc/meminfo") as meminfo:
+                total_kb = int(next(line for line in meminfo if line.startswith("MemTotal")).split()[1])
+            cap = min(total_kb * 1024 // 3, 8 * 1024 * 1024 * 1024)
+        except (OSError, ValueError, StopIteration):
+            cap = 8 * 1024 * 1024 * 1024
+    resource.setrlimit(resource.RLIMIT_AS, (cap, cap))
 
 
 def main() -> int:
