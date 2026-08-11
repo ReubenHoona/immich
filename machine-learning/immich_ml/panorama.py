@@ -55,6 +55,7 @@ PREVIEW_MAX_DIM = 1440
 SPHERICAL_REGISTER_DIM = 1600  # feature/registration resolution for the spherical fallback
 SPHERICAL_RANGE_WIDTH = 5  # match each frame to +/- this many ordered neighbours
 SPHERICAL_TIMEOUT_S = 600  # hard cap on the isolated spherical stitch subprocess
+SPHERICAL_MAX_CANVAS_MP = 32.0  # compose-time canvas area budget (blender pyramids scale with it)
 
 # The spherical fallback runs in a forked child (see _stitch_spherical). Frames are handed to the
 # child via this module global (inherited copy-on-write) rather than pickled; the lock serialises the
@@ -472,6 +473,23 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
     if options.compositeResolution == "preview":
         compose_cap = min(compose_cap, PREVIEW_MAX_DIM // 2)
     compose_factor = min(1.0, compose_cap / max(reg[0].shape[:2]))
+
+    # Probe the projected footprint before allocating anything: a drifted registration can imply a
+    # canvas of hundreds of megapixels, and the multi-band blender allocates pyramids across all of
+    # it — enough to breach the container memory limit. Clamp the compose scale to the area budget.
+    probe = cv2_.PyRotationWarper("spherical", warped_scale)
+    x0 = y0 = np.inf
+    x1 = y1 = -np.inf
+    for i, im in enumerate(reg):
+        rx, ry, rw, rh = probe.warpRoi((im.shape[1], im.shape[0]), cameras[i].K().astype(np.float32), cameras[i].R)
+        x0, y0 = min(x0, rx), min(y0, ry)
+        x1, y1 = max(x1, rx + rw), max(y1, ry + rh)
+    full_canvas_mp = max(1.0, (x1 - x0) * (y1 - y0) / 1e6)
+    canvas_factor = (SPHERICAL_MAX_CANVAS_MP / full_canvas_mp) ** 0.5
+    if canvas_factor < compose_factor:
+        log.info(f"Spherical canvas would be {full_canvas_mp:.0f}MP at full scale; clamping compose to fit")
+        compose_factor = canvas_factor
+
     warper = cv2_.PyRotationWarper("spherical", warped_scale * compose_factor)
 
     corners: list[Any] = []
@@ -565,8 +583,11 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
     allowance = budget / len(images)
     frames: list[NDArray[np.uint8]] = []
     total_megapixels = 0.0
-    for image in images:
+    for index, image in enumerate(images):
         frame = _decode(image)
+        # release each compressed payload as its frame is produced; a 20-frame sweep of originals
+        # is ~300MB of JPEG bytes that would otherwise stay resident for the whole stitch
+        images[index] = b""
         if options.compositeResolution == "preview":
             frame = _downscale(frame, PREVIEW_MAX_DIM)
         megapixels = frame.shape[0] * frame.shape[1] / 1e6
@@ -612,8 +633,13 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
         # adjustment (status 3) or slip through as a degenerate OK result; both recover with the
         # low-level spherical pipeline. Try it before surfacing the planar failure reason.
         if options.sphericalFallback and len(frames) >= 3:
+            # hand the forked child only registration-size copies and free the budget-capped frames
+            # first — the cgroup memory limit counts parent and child together, and the planar
+            # working set plus a second pipeline was enough to OOM-kill the worker
+            registration = [_downscale(frame, SPHERICAL_REGISTER_DIM) for frame in frames]
+            frames.clear()
             try:
-                spherical = _stitch_spherical(frames, options)
+                spherical = _stitch_spherical(registration, options)
             except cv2.error as error:
                 log.warning(f"Spherical fallback raised: {str(error).splitlines()[-1][:120]}")
                 spherical = None
@@ -637,10 +663,13 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
     # sweeps the spherical fallback recovers, so route degenerate planar output there too.
     median_frame_area = float(np.median([frame.shape[0] * frame.shape[1] for frame in frames]))
     if pano.shape[0] * pano.shape[1] < 0.5 * median_frame_area:
+        pano = np.empty(0, dtype=np.uint8)  # release the garbage canvas before the fallback allocates
         return spherical_fallback_or_raise("Stitch failed: degenerate result (registration collapsed the scene)")
     filled = float((cv2.cvtColor(pano, cv2.COLOR_BGR2GRAY) > 8).mean())
     if filled < 0.85:
-        return spherical_fallback_or_raise(f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)")
+        reason = f"Stitch failed: degenerate result (canvas only {filled:.0%} filled)"
+        pano = np.empty(0, dtype=np.uint8)  # a scattered-fragment canvas can be huge; free it first
+        return spherical_fallback_or_raise(reason)
     if options.verifySources:
         missing = _verify_sources(frames, pano)
         if missing and len(frames) - len(missing) < max(2, len(frames) // 2):
