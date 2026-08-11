@@ -5,11 +5,10 @@ Exposed through dedicated endpoints in main.py (the /predict pipeline is single-
 All functions here are synchronous and CPU-bound; callers run them in the thread pool.
 """
 
-import logging
-import multiprocessing as mp
+import json
 import os
-import resource
-import signal
+import subprocess
+import sys
 import tempfile
 from typing import Any, Literal, TypedDict, cast
 
@@ -18,7 +17,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 
-from immich_ml.config import log, settings
+from immich_ml.config import log
 
 
 class PanoramaError(Exception):
@@ -508,84 +507,55 @@ def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int
     The whole pipeline runs in a *spawned* child: stitching can segfault or OOM on pathological
     input (a divergent registration implies an arbitrarily large compose canvas), and running it
     in-process both risked the worker and left gigabytes of freed-but-retained heap behind after
-    every job. Spawn (not fork) because forking a threaded gunicorn/uvicorn worker can deadlock the
-    child on locks held by other threads at fork time — observed as a stitch hanging to its
-    timeout. Payloads travel via a spool directory, not process args: pickling hundreds of MB
-    through the spawn bootstrap pipe wedges both ends. Any crash or timeout surfaces as a clean 422."""
-    ctx = mp.get_context("spawn")
+    every job. A plain fork+exec subprocess (python -m immich_ml.stitch_cli) rather than
+    multiprocessing: mp's fork start deadlocks under a threaded gunicorn parent (inherited locks)
+    and its spawn bootstrap wedged the same way, whereas exec resets the child completely. The
+    spool directory carries payloads in and the result out; the child's stderr is captured to a
+    file so failures are always inspectable. Any crash or timeout surfaces as a clean 422."""
     with tempfile.TemporaryDirectory(prefix="immich-stitch-") as spool_dir:
-        paths: list[str] = []
         for index, image in enumerate(images):
-            path = os.path.join(spool_dir, f"{index:03}.bin")
-            with open(path, "wb") as spool_file:
+            with open(os.path.join(spool_dir, f"{index:03}.bin"), "wb") as spool_file:
                 spool_file.write(image)
-            paths.append(path)
-        parent_conn, child_conn = ctx.Pipe(duplex=False)
-        proc = ctx.Process(target=_stitch_child, args=(child_conn, paths, options), daemon=True)
-        proc.start()
-        child_conn.close()  # only the child keeps the send end
-        outcome: Any = None
-        produced = parent_conn.poll(STITCH_TIMEOUT_S)
-        if produced:
-            try:
-                outcome = parent_conn.recv()
-            except EOFError:  # child died (segfault/OOM) before sending
-                produced = False
-        parent_conn.close()
-        proc.join(5)
-        if proc.is_alive():
+        with open(os.path.join(spool_dir, "options.json"), "w") as options_file:
+            options_file.write(options.model_dump_json())
+        stderr_path = os.path.join(spool_dir, "stderr.log")
+        with open(stderr_path, "wb") as stderr_file:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "immich_ml.stitch_cli", spool_dir],
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_file,
+                cwd="/",
+            )
+        try:
+            exit_code = proc.wait(STITCH_TIMEOUT_S)
+        except subprocess.TimeoutExpired:
             proc.kill()
-            proc.join(5)
-            raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget")
-    if not produced:
-        log.warning(f"Stitch subprocess died without a result (exit {proc.exitcode}) — likely out of memory")
-        raise PanoramaError(422, "Stitch failed: worker crashed (likely out of memory; lower the megapixel budget)")
-    if isinstance(outcome, PanoramaError):
-        raise outcome
-    return cast("tuple[bytes, int, int]", outcome)
+            proc.wait(10)
+            log.warning(f"Stitch subprocess exceeded {STITCH_TIMEOUT_S}s; killed. Last output:\n{_tail(stderr_path)}")
+            raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget") from None
+
+        result_path = os.path.join(spool_dir, "result.json")
+        if exit_code != 0 or not os.path.exists(result_path):
+            log.warning(f"Stitch subprocess died (exit {exit_code}). Last output:\n{_tail(stderr_path)}")
+            raise PanoramaError(422, "Stitch failed: worker crashed (likely out of memory; lower the megapixel budget)")
+        with open(result_path) as result_file:
+            result = json.load(result_file)
+        if "status_code" in result:
+            raise PanoramaError(result["status_code"], result["message"])
+        with open(os.path.join(spool_dir, "result.bin"), "rb") as data_file:
+            data = data_file.read()
+        return data, int(result["width"]), int(result["height"])
 
 
-def _cgroup_memory_limit() -> int | None:
+def _tail(path: str, max_bytes: int = 2000) -> str:
     try:
-        raw = open("/sys/fs/cgroup/memory.max").read().strip()
-        return None if raw == "max" else int(raw)
-    except (OSError, ValueError):
-        return None
-
-
-def _stitch_child(conn: Any, paths: list[str], options: StitchOptions) -> None:
-    # Entry point of the spawned stitch process: fresh interpreter, no inherited locks or heap.
-    try:
-        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
-            signal.signal(sig, signal.SIG_DFL)
-        # child stdout/stderr don't reliably surface under gunicorn; log stages to a file so a
-        # SIGKILL'd stitch leaves evidence of where it died
-        handler = logging.FileHandler("/tmp/immich-stitch-child.log")
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        logging.getLogger("immich_ml").addHandler(handler)
-        logging.getLogger("immich_ml").setLevel(logging.DEBUG)
-        # keep this process's allocations below the container limit (minus headroom for the
-        # worker) so exhaustion raises a catchable error instead of a cgroup SIGKILL that takes
-        # out whichever process the kernel picks
-        cgroup_limit = _cgroup_memory_limit()
-        if cgroup_limit is not None:
-            child_cap = max(cgroup_limit - 1536 * 1024 * 1024, cgroup_limit // 2)
-            resource.setrlimit(resource.RLIMIT_AS, (child_cap, child_cap))
-            log.debug(f"Stitch child capped at {child_cap / 1073741824:.1f}GB of address space")
-        threads = options.threads or settings.pano_threads
-        if threads > 0:
-            cv2.setNumThreads(threads)
-        conn.send(_stitch(paths, options))
-    except MemoryError:
-        log.warning("Stitch subprocess ran out of memory")
-        conn.send(PanoramaError(422, "Stitch failed: out of memory (lower the megapixel budget)"))
-    except PanoramaError as err:
-        conn.send(err)
-    except Exception as err:
-        log.warning(f"Stitch subprocess failed: {type(err).__name__}: {str(err).splitlines()[0][:120]}")
-        conn.send(PanoramaError(500, "Stitch failed unexpectedly"))
-    finally:
-        conn.close()
+        with open(path, "rb") as tail_file:
+            tail_file.seek(0, os.SEEK_END)
+            size = tail_file.tell()
+            tail_file.seek(max(0, size - max_bytes))
+            return tail_file.read().decode(errors="replace").strip()
+    except OSError:
+        return "(no output captured)"
 
 
 def _stitch(paths: list[str], options: StitchOptions) -> tuple[bytes, int, int]:
