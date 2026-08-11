@@ -56,6 +56,7 @@ SPHERICAL_REGISTER_DIM = 1600  # feature/registration resolution for the spheric
 SPHERICAL_RANGE_WIDTH = 5  # match each frame to +/- this many ordered neighbours
 SPHERICAL_TIMEOUT_S = 600  # hard cap on the isolated spherical stitch subprocess
 SPHERICAL_MAX_CANVAS_MP = 32.0  # compose-time canvas area budget (blender pyramids scale with it)
+SPHERICAL_FIRST_FRAMES = 14  # chains this long are rotational sweeps; try the spherical pipeline first
 
 # The spherical fallback runs in a forked child (see _stitch_spherical). Frames are handed to the
 # child via this module global (inherited copy-on-write) rather than pickled; the lock serialises the
@@ -621,6 +622,23 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
             log.warning(f"Stitch attempt raised: {str(error).splitlines()[-1][:120]}")
             return int(cv2.Stitcher_ERR_HOMOGRAPHY_EST_FAIL), None
 
+    spherical_first = options.sphericalFallback and len(frames) >= SPHERICAL_FIRST_FRAMES
+    if spherical_first:
+        # A chain this long is a rotational sweep: the planar stitcher's doomed attempts on it are
+        # both slow (minutes of registration) and memory-hazardous (a divergent registration can
+        # imply a multi-gigabyte compose canvas before cv2's own size check throws), so run the
+        # spherical pipeline first and keep planar as the second opinion.
+        registration = [_downscale(frame, SPHERICAL_REGISTER_DIM) for frame in frames]
+        try:
+            spherical = _stitch_spherical(registration, options)
+        except cv2.error as error:
+            log.warning(f"Spherical-first stitch raised: {str(error).splitlines()[-1][:120]}")
+            spherical = None
+        del registration
+        if spherical is not None:
+            return spherical
+        log.info("Spherical-first stitch found no coherent sweep; trying the planar pipeline")
+
     status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.6)
     if status != cv2.Stitcher_OK:
         status, pano = try_stitch(cv2.Stitcher_PANORAMA, 0.4)
@@ -632,7 +650,7 @@ def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, in
         # Wide/360 rotational sweeps either fail the high-level stitcher's camera-parameter
         # adjustment (status 3) or slip through as a degenerate OK result; both recover with the
         # low-level spherical pipeline. Try it before surfacing the planar failure reason.
-        if options.sphericalFallback and len(frames) >= 3:
+        if options.sphericalFallback and not spherical_first and len(frames) >= 3:
             # hand the forked child only registration-size copies and free the budget-capped frames
             # first — the cgroup memory limit counts parent and child together, and the planar
             # working set plus a second pipeline was enough to OOM-kill the worker
