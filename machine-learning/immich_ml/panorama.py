@@ -6,9 +6,7 @@ All functions here are synchronous and CPU-bound; callers run them in the thread
 """
 
 import multiprocessing as mp
-import os
 import signal
-import threading
 from typing import Any, Literal, TypedDict, cast
 
 import cv2
@@ -54,15 +52,9 @@ MAX_FRAMES = 32
 PREVIEW_MAX_DIM = 1440
 SPHERICAL_REGISTER_DIM = 1600  # feature/registration resolution for the spherical fallback
 SPHERICAL_RANGE_WIDTH = 5  # match each frame to +/- this many ordered neighbours
-SPHERICAL_TIMEOUT_S = 600  # hard cap on the isolated spherical stitch subprocess
+STITCH_TIMEOUT_S = 780  # hard cap on the isolated stitch subprocess (the server aborts at 840s)
 SPHERICAL_MAX_CANVAS_MP = 32.0  # compose-time canvas area budget (blender pyramids scale with it)
 SPHERICAL_FIRST_FRAMES = 14  # chains this long are rotational sweeps; try the spherical pipeline first
-
-# The spherical fallback runs in a forked child (see _stitch_spherical). Frames are handed to the
-# child via this module global (inherited copy-on-write) rather than pickled; the lock serialises the
-# brief fork setup across worker threads.
-_spherical_lock = threading.Lock()
-_spherical_input: tuple[list[NDArray[np.uint8]], StitchOptions] | None = None
 
 
 class LinkStats(TypedDict):
@@ -356,68 +348,14 @@ def _stitch_spherical(frames: list[NDArray[np.uint8]], options: StitchOptions) -
     the warp/blend composite is capped by frame count so a wide canvas stays tractable. Returns the
     encoded (jpeg, w, h), or None when registration collapses (caller then raises 422).
 
-    The low-level cv2.detail pipeline can segfault or OOM on pathological input, which would otherwise
-    take down the whole ML worker, so it runs in a forked subprocess. Any crash/timeout returns None
-    (caller then raises 422); a validated-but-unusable result surfaces as PanoramaError."""
-    global _spherical_input
-    ctx = mp.get_context("fork")
-    with _spherical_lock:
-        _spherical_input = (frames, options)
-        parent_conn, child_conn = ctx.Pipe(duplex=False)
-        proc = ctx.Process(target=_spherical_child, args=(child_conn,), daemon=True)
-        try:
-            proc.start()
-            child_conn.close()  # only the child keeps the send end
-            outcome: Any = None
-            produced = parent_conn.poll(SPHERICAL_TIMEOUT_S)
-            if produced:
-                try:
-                    outcome = parent_conn.recv()
-                except EOFError:  # child died (segfault/OOM) before sending
-                    produced = False
-            parent_conn.close()
-            proc.join(5)
-            if proc.is_alive():
-                # SIGKILL, not SIGTERM: the fork inherits uvicorn's asyncio signal handling, so a
-                # child that never re-armed its handlers could shrug off terminate() and the
-                # unbounded join would wedge this worker thread while holding the lock
-                proc.kill()
-                proc.join(5)
-                log.warning("Spherical stitch exceeded the time budget; killed")
-                return None
-        finally:
-            _spherical_input = None
-    if not produced:
-        log.info(f"Spherical stitch subprocess produced no result (exit {proc.exitcode})")
-        return None
-    if isinstance(outcome, PanoramaError):
-        raise outcome
-    return cast("tuple[bytes, int, int] | None", outcome)
-
-
-def _spherical_child(conn: Any) -> None:
-    # Runs in the forked child; reads the handed-over frames from the inherited module global and
-    # returns the outcome (encoded tuple, a PanoramaError, or None) over the pipe. A segfault/OOM
-    # simply closes the pipe, which the parent reads as "no result".
+    Runs inline (the whole stitch already executes in an isolated subprocess); any opencv failure on
+    degenerate input is treated as an incoherent sweep -> None, and only PanoramaError (a validated
+    but unusable result) propagates."""
     try:
-        # the fork inherits uvicorn's signal dispositions; restore defaults so the parent's
-        # kill/terminate escalation can actually stop a runaway child
-        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
-            signal.signal(sig, signal.SIG_DFL)
-        assert _spherical_input is not None
-        frames, options = _spherical_input
-        # the fork also inherits the parent's cv2 thread-pool *state* but not its worker threads;
-        # explicitly reconfiguring the pool prevents dispatching work to threads that don't exist
-        threads = options.threads or settings.pano_threads
-        cv2.setNumThreads(threads if threads > 0 else max(1, (os.cpu_count() or 2) - 1))
-        conn.send(_stitch_spherical_impl(frames, options))
-    except PanoramaError as err:
-        conn.send(err)
-    except Exception as err:  # cv2.error and anything else -> not a coherent sweep
-        log.info(f"Spherical stitch: registration failed ({type(err).__name__}: {str(err).splitlines()[0][:80]})")
-        conn.send(None)
-    finally:
-        conn.close()
+        return _stitch_spherical_impl(frames, options)
+    except cv2.error as error:
+        log.info(f"Spherical stitch: opencv registration failed ({str(error).splitlines()[-1][:100]}); no sweep")
+        return None
 
 
 def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptions) -> tuple[bytes, int, int] | None:
@@ -553,18 +491,56 @@ def _stitch_spherical_impl(frames: list[NDArray[np.uint8]], options: StitchOptio
 
 
 def stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:
-    """Stitch ordered frames into a panorama. Returns (jpeg bytes, width, height)."""
-    threads = options.threads or settings.pano_threads
-    if threads <= 0:
-        return _stitch(images, options)
-    # cv2's thread count is process-global; restore it afterwards so detect/OCR/transform requests
-    # running on other worker threads aren't permanently rescoped by one stitch's setting
-    previous = cv2.getNumThreads()
-    cv2.setNumThreads(threads)
+    """Stitch ordered frames into a panorama in an isolated subprocess. Returns (jpeg, width, height).
+
+    The whole pipeline runs in a *spawned* child: stitching can segfault or OOM on pathological
+    input (a divergent registration implies an arbitrarily large compose canvas), and running it
+    in-process both risked the worker and left gigabytes of freed-but-retained heap behind after
+    every job. Spawn (not fork) because forking a threaded gunicorn/uvicorn worker can deadlock the
+    child on locks held by other threads at fork time — observed as a stitch hanging to its
+    timeout. Any crash or timeout surfaces as a clean 422."""
+    ctx = mp.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_stitch_child, args=(child_conn, images, options), daemon=True)
+    proc.start()
+    child_conn.close()  # only the child keeps the send end
+    outcome: Any = None
+    produced = parent_conn.poll(STITCH_TIMEOUT_S)
+    if produced:
+        try:
+            outcome = parent_conn.recv()
+        except EOFError:  # child died (segfault/OOM) before sending
+            produced = False
+    parent_conn.close()
+    proc.join(5)
+    if proc.is_alive():
+        proc.kill()
+        proc.join(5)
+        raise PanoramaError(422, f"Stitch failed: exceeded the {STITCH_TIMEOUT_S}s time budget")
+    if not produced:
+        log.warning(f"Stitch subprocess died without a result (exit {proc.exitcode}) — likely out of memory")
+        raise PanoramaError(422, "Stitch failed: worker crashed (likely out of memory; lower the megapixel budget)")
+    if isinstance(outcome, PanoramaError):
+        raise outcome
+    return cast("tuple[bytes, int, int]", outcome)
+
+
+def _stitch_child(conn: Any, images: list[bytes], options: StitchOptions) -> None:
+    # Entry point of the spawned stitch process: fresh interpreter, no inherited locks or heap.
     try:
-        return _stitch(images, options)
+        for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGQUIT, signal.SIGABRT):
+            signal.signal(sig, signal.SIG_DFL)
+        threads = options.threads or settings.pano_threads
+        if threads > 0:
+            cv2.setNumThreads(threads)
+        conn.send(_stitch(images, options))
+    except PanoramaError as err:
+        conn.send(err)
+    except Exception as err:
+        log.warning(f"Stitch subprocess failed: {type(err).__name__}: {str(err).splitlines()[0][:120]}")
+        conn.send(PanoramaError(500, "Stitch failed unexpectedly"))
     finally:
-        cv2.setNumThreads(previous)
+        conn.close()
 
 
 def _stitch(images: list[bytes], options: StitchOptions) -> tuple[bytes, int, int]:

@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 import pytest
 
-from immich_ml.panorama import DetectOptions, PanoramaError, StitchOptions, _stitch_spherical, detect, stitch
+from immich_ml.panorama import DetectOptions, PanoramaError, StitchOptions, detect, stitch
 
 
 @pytest.fixture(autouse=True)
@@ -153,18 +153,24 @@ class TestPanoramaStitch:
         assert len(hi) > len(lo)
 
 
-class TestSphericalFallback:
-    def test_spherical_fallback_is_crash_isolated(self) -> None:
-        # The low-level cv2.detail pipeline can segfault/OOM on pathological input; fork isolation
-        # must turn that into a graceful None (or a valid wide panorama), never a crashed worker.
-        frames = _rotated_views(_textured_scene(width=1200, height=800), count=5, deg_step=7.0)
-        result = _stitch_spherical(frames, StitchOptions(compositeResolution="preview"))
-        assert result is None or (result[1] > result[2] and len(result[0]) > 0)
+class TestStitchIsolation:
+    def test_stitch_is_crash_isolated(self) -> None:
+        # Stitching runs in a spawned subprocess: pathological input may segfault or OOM the child,
+        # but the caller must always get either a panorama or a clean PanoramaError — never a
+        # crashed worker. Rotational synthetic frames exercise the spherical pipeline.
+        frames = [_encode(f) for f in _rotated_views(_textured_scene(width=1200, height=800), count=5, deg_step=7.0)]
+        try:
+            data, width, height = stitch(frames, StitchOptions(compositeResolution="preview"))
+            assert width > 0 and height > 0 and len(data) > 0
+        except PanoramaError as err:
+            assert err.status_code in (422, 500)
 
-    def test_spherical_returns_none_when_disconnected(self) -> None:
-        # unrelated frames: registration collapses (cv2.detail may raise/segfault) -> graceful None
-        frames = [_textured_scene(seed=s) for s in (1, 500, 999)]
-        assert _stitch_spherical(frames, StitchOptions()) is None
+    def test_disconnected_frames_fail_cleanly(self) -> None:
+        # unrelated frames: no coherent registration in either pipeline -> clean 422 from the child
+        frames = [_encode(_textured_scene(seed=s)) for s in (1, 500, 999)]
+        with pytest.raises(PanoramaError) as err:
+            stitch(frames, StitchOptions())
+        assert err.value.status_code == 422
 
     def test_fallback_disabled_surfaces_planar_failure(self) -> None:
         rngs = [np.random.default_rng(i) for i in range(3)]
