@@ -26,6 +26,77 @@ import { mimeTypes } from 'src/utils/mime-types';
 export class AssetJobRepository {
   constructor(@InjectKysely() private db: Kysely<DB>) {}
 
+  /** Everything the RAW+JPEG pairing rule needs to judge one asset. */
+  private autoStackColumns = [
+    'asset.id as id',
+    'asset.ownerId as ownerId',
+    'asset.originalFileName as originalFileName',
+    'asset.stackId as stackId',
+    'asset.visibility as visibility',
+    'asset_exif.dateTimeOriginal as dateTimeOriginal',
+    'asset_exif.make as make',
+    'asset_exif.model as model',
+  ] as const;
+
+  @GenerateSql({ params: [DummyValue.UUID] })
+  getForAutoStackJob(id: string) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select(this.autoStackColumns)
+      .where('asset.id', '=', asUuid(id))
+      .where('asset.deletedAt', 'is', null)
+      .executeTakeFirst();
+  }
+
+  /**
+   * Assets belonging to `ownerId` whose capture time falls inside [from, to] and that are not
+   * already stacked — i.e. the only assets that could be the RAW/JPEG twin of another one.
+   */
+  @GenerateSql({
+    params: [{ ownerId: DummyValue.UUID, from: DummyValue.DATE, to: DummyValue.DATE, excludeId: DummyValue.UUID }],
+  })
+  getAutoStackCandidates({
+    ownerId,
+    from,
+    to,
+    excludeId,
+  }: {
+    ownerId: string;
+    from: Date;
+    to: Date;
+    excludeId: string;
+  }) {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select(this.autoStackColumns)
+      .where('asset.ownerId', '=', asUuid(ownerId))
+      .where('asset.type', '=', AssetType.Image)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.stackId', 'is', null)
+      .where('asset.id', '!=', asUuid(excludeId))
+      .where('asset_exif.dateTimeOriginal', '>=', from)
+      .where('asset_exif.dateTimeOriginal', '<=', to)
+      .$call(withDefaultVisibility)
+      .execute();
+  }
+
+  /** Every un-stacked image that could have a twin — the backfill queues one job per row. */
+  @GenerateSql({ params: [], stream: true })
+  streamForAutoStack() {
+    return this.db
+      .selectFrom('asset')
+      .innerJoin('asset_exif', 'asset_exif.assetId', 'asset.id')
+      .select(['asset.id as id'])
+      .where('asset.type', '=', AssetType.Image)
+      .where('asset.deletedAt', 'is', null)
+      .where('asset.stackId', 'is', null)
+      .where('asset_exif.dateTimeOriginal', 'is not', null)
+      .$call(withDefaultVisibility)
+      .stream();
+  }
+
   @GenerateSql({ params: [DummyValue.UUID] })
   getForSearchDuplicatesJob(id: string) {
     return this.db

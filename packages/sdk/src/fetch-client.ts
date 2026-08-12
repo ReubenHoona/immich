@@ -1229,6 +1229,7 @@ export type QueueResponseLegacyDto = {
     queueStatus: QueueStatusLegacyDto;
 };
 export type QueuesResponseLegacyDto = {
+    autoStack: QueueResponseLegacyDto;
     backgroundTask: QueueResponseLegacyDto;
     backupDatabase: QueueResponseLegacyDto;
     duplicateDetection: QueueResponseLegacyDto;
@@ -2370,6 +2371,8 @@ export type SystemConfigImageDto = {
     extractEmbedded: boolean;
     fullsize: SystemConfigGeneratedFullsizeImageDto;
     preview: SystemConfigGeneratedImageDto;
+    /** Stack RAW files with the JPEG saved alongside them */
+    stackRawJpeg: boolean;
     thumbnail: SystemConfigGeneratedImageDto;
 };
 export type SystemConfigIntegrityChecksumJob = {
@@ -7457,7 +7460,8 @@ export enum QueueName {
     Ocr = "ocr",
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
-    Editor = "editor"
+    Editor = "editor",
+    AutoStack = "autoStack"
 }
 export enum QueueCommand {
     Start = "start",
@@ -7495,6 +7499,8 @@ export enum QueueJobStatus {
     Paused = "paused"
 }
 export enum JobName {
+    AssetAutoStackQueueAll = "AssetAutoStackQueueAll",
+    AssetAutoStack = "AssetAutoStack",
     AssetDelete = "AssetDelete",
     AssetDeleteCheck = "AssetDeleteCheck",
     AssetDetectFacesQueueAll = "AssetDetectFacesQueueAll",

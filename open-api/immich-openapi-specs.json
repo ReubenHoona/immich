@@ -19433,6 +19433,8 @@
       "JobName": {
         "description": "Job name",
         "enum": [
+          "AssetAutoStackQueueAll",
+          "AssetAutoStack",
           "AssetDelete",
           "AssetDeleteCheck",
           "AssetDetectFacesQueueAll",
@@ -21773,7 +21775,8 @@
           "ocr",
           "workflow",
           "integrityCheck",
-          "editor"
+          "editor",
+          "autoStack"
         ],
         "type": "string"
       },
@@ -21889,6 +21892,9 @@
       },
       "QueuesResponseLegacyDto": {
         "properties": {
+          "autoStack": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "backgroundTask": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -21948,6 +21954,7 @@
           }
         },
         "required": [
+          "autoStack",
           "backgroundTask",
           "backupDatabase",
           "duplicateDetection",
@@ -26082,6 +26089,10 @@
           "preview": {
             "$ref": "#/components/schemas/SystemConfigGeneratedImageDto"
           },
+          "stackRawJpeg": {
+            "description": "Stack RAW files with the JPEG saved alongside them",
+            "type": "boolean"
+          },
           "thumbnail": {
             "$ref": "#/components/schemas/SystemConfigGeneratedImageDto"
           }
@@ -26091,6 +26102,7 @@
           "extractEmbedded",
           "fullsize",
           "preview",
+          "stackRawJpeg",
           "thumbnail"
         ],
         "type": "object"

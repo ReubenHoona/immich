@@ -214,6 +214,17 @@
             {disabled}
           />
         </div>
+
+        <div class="mt-4">
+          <SettingSwitch
+            title={$t('admin.image_stack_raw_jpeg')}
+            subtitle={$t('admin.image_stack_raw_jpeg_description')}
+            checked={configToEdit.image.stackRawJpeg}
+            onToggle={() => (configToEdit.image.stackRawJpeg = !configToEdit.image.stackRawJpeg)}
+            isEdited={configToEdit.image.stackRawJpeg !== config.image.stackRawJpeg}
+            {disabled}
+          />
+        </div>
       </div>
 
       <div class="ms-4 mt-4">

@@ -390,6 +390,7 @@ const SystemConfigImageSchema = z
     fullsize: SystemConfigGeneratedFullsizeImageSchema,
     colorspace: ColorspaceSchema,
     extractEmbedded: configBool.describe('Extract embedded'),
+    stackRawJpeg: configBool.describe('Stack RAW files with the JPEG saved alongside them'),
   })
   .meta({ id: 'SystemConfigImageDto' });
 

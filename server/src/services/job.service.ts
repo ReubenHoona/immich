@@ -7,6 +7,7 @@ import { ArgsOf } from 'src/repositories/event.repository';
 import { BaseService } from 'src/services/base.service';
 import { JobItem } from 'src/types';
 import { hexOrBufferToBase64 } from 'src/utils/bytes';
+import { isRawJpegStackingEnabled } from 'src/utils/misc';
 
 const asJobItem = (dto: JobCreateDto): JobItem => {
   switch (dto.name) {
@@ -186,6 +187,14 @@ export class JobService extends BaseService {
 
         if (asset.type === AssetType.Video) {
           jobs.push({ name: JobName.AssetEncodeVideo, data: item.data });
+        }
+
+        // pair a freshly uploaded RAW with the JPEG the camera saved next to it (and vice versa)
+        if (asset.type === AssetType.Image) {
+          const { image } = await this.getConfig({ withCache: true });
+          if (isRawJpegStackingEnabled(image)) {
+            jobs.push({ name: JobName.AssetAutoStack, data: item.data });
+          }
         }
 
         await this.jobRepository.queueAll(jobs);

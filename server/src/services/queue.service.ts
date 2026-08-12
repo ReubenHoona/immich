@@ -245,6 +245,10 @@ export class QueueService extends BaseService {
         return this.jobRepository.queue({ name: JobName.OcrQueueAll, data: { force } });
       }
 
+      case QueueName.AutoStack: {
+        return this.jobRepository.queue({ name: JobName.AssetAutoStackQueueAll, data: { force } });
+      }
+
       default: {
         throw new BadRequestException(`Invalid job name: ${name}`);
       }
@@ -257,6 +261,8 @@ export class QueueService extends BaseService {
       QueueName.StorageTemplateMigration,
       QueueName.DuplicateDetection,
       QueueName.BackupDatabase,
+      // serial on purpose: the JPEG's and the RAW's jobs would otherwise race to stack the pair
+      QueueName.AutoStack,
     ].includes(name);
   }
 

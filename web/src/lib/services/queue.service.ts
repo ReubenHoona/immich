@@ -18,6 +18,7 @@ import {
   mdiFileJpgBox,
   mdiFileXmlBox,
   mdiFolderMove,
+  mdiImageMultipleOutline,
   mdiImageSearch,
   mdiLibraryShelves,
   mdiOcr,
@@ -192,6 +193,11 @@ export const asQueueItem = ($t: MessageFormatter, queue: { name: QueueName }): Q
       icon: mdiContentDuplicate,
       title: $t('admin.machine_learning_duplicate_detection'),
       subtitle: $t('admin.duplicate_detection_job_description'),
+    },
+    [QueueName.AutoStack]: {
+      icon: mdiImageMultipleOutline,
+      title: $t('admin.auto_stack_job'),
+      subtitle: $t('admin.auto_stack_job_description'),
     },
     [QueueName.FaceDetection]: {
       icon: mdiFaceRecognition,

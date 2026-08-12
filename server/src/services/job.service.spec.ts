@@ -5,6 +5,17 @@ import { AssetFactory } from 'test/factories/asset.factory';
 import { newUuid } from 'test/small.factory';
 import { newTestService, ServiceMocks } from 'test/utils';
 
+const setUpAutoStack = (mocks: ServiceMocks, enabled: boolean, type: AssetType = AssetType.Image) => {
+  mocks.systemMetadata.get.mockResolvedValue({ image: { stackRawJpeg: enabled } });
+  mocks.asset.getByIdsWithAllRelationsButStacks.mockResolvedValue([
+    AssetFactory.create({ id: 'asset-1', type }),
+  ] as never);
+  mocks.job.run.mockResolvedValue(JobStatus.Success);
+};
+
+const queuedJobNames = (mocks: ServiceMocks): JobName[] =>
+  (mocks.job.queueAll.mock.calls.at(-1)?.[0] ?? []).map(({ name }: { name: JobName }) => name);
+
 describe(JobService.name, () => {
   let sut: JobService;
   let mocks: ServiceMocks;
@@ -117,5 +128,33 @@ describe(JobService.name, () => {
         expect(mocks.job.queueAll).not.toHaveBeenCalled();
       });
     }
+
+    describe('auto stacking on upload', () => {
+      const uploaded = { name: JobName.AssetGenerateThumbnails, data: { id: 'asset-1', source: 'upload' } } as const;
+
+      it('queues AssetAutoStack for an uploaded image when the feature is on', async () => {
+        setUpAutoStack(mocks, true);
+
+        await sut.onJobRun(QueueName.BackgroundTask, uploaded);
+
+        expect(queuedJobNames(mocks)).toContain(JobName.AssetAutoStack);
+      });
+
+      it('does not queue AssetAutoStack when the feature is off', async () => {
+        setUpAutoStack(mocks, false);
+
+        await sut.onJobRun(QueueName.BackgroundTask, uploaded);
+
+        expect(queuedJobNames(mocks)).not.toContain(JobName.AssetAutoStack);
+      });
+
+      it('does not queue AssetAutoStack for a video', async () => {
+        setUpAutoStack(mocks, true, AssetType.Video);
+
+        await sut.onJobRun(QueueName.BackgroundTask, uploaded);
+
+        expect(queuedJobNames(mocks)).not.toContain(JobName.AssetAutoStack);
+      });
+    });
   });
 });

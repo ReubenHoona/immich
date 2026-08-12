@@ -50,6 +50,7 @@
     [QueueName.Workflow]: $t('workflows'),
     [QueueName.Editor]: $t('editor'),
     [QueueName.IntegrityCheck]: $t('integrity_checks'),
+    [QueueName.AutoStack]: $t('admin.auto_stack_job'),
   });
 </script>
 
