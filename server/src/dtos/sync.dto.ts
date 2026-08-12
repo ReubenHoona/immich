@@ -97,7 +97,11 @@ const SyncAssetV2Schema = z
     type: AssetTypeSchema,
     deletedAt: isoDatetimeToDate.nullable().describe('Deleted at'),
     isFavorite: z.boolean().describe('Is favorite'),
-    isOffline: z.boolean().nullable().optional().describe('Whether the original file is currently missing on the server'),
+    isOffline: z
+      .boolean()
+      .nullable()
+      .optional()
+      .describe('Whether the original file is currently missing on the server'),
     visibility: AssetVisibilitySchema,
     livePhotoVideoId: z.string().nullable().describe('Live photo video ID'),
     stackId: z.string().nullable().describe('Stack ID'),

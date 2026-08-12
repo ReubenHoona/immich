@@ -36,11 +36,6 @@
 <TableRow>
   <TableCell class="w-7/8 px-4 text-left">{path}</TableCell>
   <TableCell class="flex w-1/8 justify-end">
-    <ContextMenuButton
-      disabled={deleting}
-      position="top-right"
-      aria-label={$t('open')}
-      items={[Download, Delete]}
-    />
+    <ContextMenuButton disabled={deleting} position="top-right" aria-label={$t('open')} items={[Download, Delete]} />
   </TableCell>
 </TableRow>

@@ -92,11 +92,9 @@ export const snapshotAssetGraph = async (client: Client, assetId: string): Promi
 
   const tags = await many(client, `SELECT "tagId" FROM tag_asset WHERE "assetId" = $1 ORDER BY "tagId"`, [assetId]);
 
-  const albums = await many(
-    client,
-    `SELECT "albumId" FROM album_asset WHERE "assetId" = $1 ORDER BY "albumId"`,
-    [assetId],
-  );
+  const albums = await many(client, `SELECT "albumId" FROM album_asset WHERE "assetId" = $1 ORDER BY "albumId"`, [
+    assetId,
+  ]);
 
   const activities = await many(
     client,
@@ -104,11 +102,9 @@ export const snapshotAssetGraph = async (client: Client, assetId: string): Promi
     [assetId],
   );
 
-  const files = await many(
-    client,
-    `SELECT type, path FROM asset_file WHERE "assetId" = $1 ORDER BY type, path`,
-    [assetId],
-  );
+  const files = await many(client, `SELECT type, path FROM asset_file WHERE "assetId" = $1 ORDER BY type, path`, [
+    assetId,
+  ]);
 
   const stack = await one(
     client,
@@ -129,11 +125,13 @@ export type FieldDiff = { key: string; before: unknown; after: unknown; changed:
 /** Diff the `asset` row across two snapshots, key by key. */
 export const diffAssetRow = (before: AssetGraphSnapshot, after: AssetGraphSnapshot): FieldDiff[] => {
   const keys = new Set([...Object.keys(before.asset ?? {}), ...Object.keys(after.asset ?? {})]);
-  return [...keys].sort().map((key) => {
-    const b = before.asset?.[key];
-    const a = after.asset?.[key];
-    return { key, before: b, after: a, changed: stable(b) !== stable(a) };
-  });
+  return [...keys]
+    .toSorted((a, b) => a.localeCompare(b))
+    .map((key) => {
+      const b = before.asset?.[key];
+      const a = after.asset?.[key];
+      return { key, before: b, after: a, changed: stable(b) !== stable(a) };
+    });
 };
 
 export type GraphComparison = {
@@ -222,7 +220,7 @@ export type EvidenceMeta = {
 
 const cell = (value?: string): string =>
   (value ?? '')
-    .replaceAll('|', '\\|')
+    .replaceAll('|', String.raw`\|`)
     .replaceAll('\n', '<br>')
     .trim() || '—';
 
@@ -252,6 +250,39 @@ export class EvidenceReport {
     private readonly scenario: string,
     private readonly meta: EvidenceMeta,
   ) {}
+  private toMarkdown(): string {
+    const lines: string[] = [
+      `# Evidence — ${this.meta.title}`,
+      '',
+      `- **Scenario:** \`${this.scenario}\``,
+      `- **Result:** ${this.passed ? '✅ PASS' : '❌ FAIL'}`,
+    ];
+    if (this.meta.assetId) {
+      lines.push(`- **Asset id:** \`${this.meta.assetId}\``);
+    }
+    if (this.meta.correlationId) {
+      lines.push(`- **Correlation id:** \`${this.meta.correlationId}\``);
+    }
+    lines.push(`- **Generated:** ${new Date().toISOString()}`);
+    if (this.meta.description) {
+      lines.push('', this.meta.description);
+    }
+    lines.push(
+      '',
+      '| # | Event | Server log (by correlation id) | On-disk file + sha1 | DB diff | Result |',
+      '| - | ----- | ------------------------------ | ------------------- | ------- | ------ |',
+    );
+    for (const [index, row] of this.rows.entries()) {
+      const badge = row.result === 'PASS' ? '✅' : row.result === 'FAIL' ? '❌' : 'ℹ️';
+      lines.push(
+        `| ${index + 1} | ${cell(row.event)} | ${cell(row.serverLog)} | ${cell(row.fileState)} | ${cell(
+          row.dbDiff,
+        )} | ${badge} |`,
+      );
+    }
+    lines.push('');
+    return lines.join('\n');
+  }
 
   /** Append a raw timeline row. */
   row(row: EvidenceRow): this {
@@ -275,38 +306,6 @@ export class EvidenceReport {
 
   get passed(): boolean {
     return this.failures === 0;
-  }
-
-  private toMarkdown(): string {
-    const lines: string[] = [];
-    lines.push(`# Evidence — ${this.meta.title}`);
-    lines.push('');
-    lines.push(`- **Scenario:** \`${this.scenario}\``);
-    lines.push(`- **Result:** ${this.passed ? '✅ PASS' : '❌ FAIL'}`);
-    if (this.meta.assetId) {
-      lines.push(`- **Asset id:** \`${this.meta.assetId}\``);
-    }
-    if (this.meta.correlationId) {
-      lines.push(`- **Correlation id:** \`${this.meta.correlationId}\``);
-    }
-    lines.push(`- **Generated:** ${new Date().toISOString()}`);
-    if (this.meta.description) {
-      lines.push('');
-      lines.push(this.meta.description);
-    }
-    lines.push('');
-    lines.push('| # | Event | Server log (by correlation id) | On-disk file + sha1 | DB diff | Result |');
-    lines.push('| - | ----- | ------------------------------ | ------------------- | ------- | ------ |');
-    for (const [index, row] of this.rows.entries()) {
-      const badge = row.result === 'PASS' ? '✅' : row.result === 'FAIL' ? '❌' : 'ℹ️';
-      lines.push(
-        `| ${index + 1} | ${cell(row.event)} | ${cell(row.serverLog)} | ${cell(row.fileState)} | ${cell(
-          row.dbDiff,
-        )} | ${badge} |`,
-      );
-    }
-    lines.push('');
-    return lines.join('\n');
   }
 
   /** Write the markdown report to `e2e/evidence/<scenario>.md` and return the absolute path. */

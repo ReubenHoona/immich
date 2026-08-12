@@ -1,10 +1,10 @@
 import {
   AssetMediaResponseDto,
+  createActivity,
   LoginResponseDto,
   ManualJobName,
   QueueName,
   ReactionType,
-  createActivity,
 } from '@immich/sdk';
 import { createHash, randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
@@ -157,7 +157,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
       const offlineInfo = await utils.getAssetInfo(admin.accessToken, asset.id);
       const missingBefore = await captureFileState(originalPath);
       const reportsBefore = await missingReportCount(asset.id);
-      ev.assert('scan set asset offline + opened report', offlineInfo.isOffline === true && reportsBefore === 1, {
+      ev.assert('scan set asset offline + opened report', offlineInfo.isOffline && reportsBefore === 1, {
         fileState: formatFileState(missingBefore),
         dbDiff: `isOffline=${offlineInfo.isOffline}, missing_file reports=${reportsBefore}`,
         serverLog: summarizeLogs(await utils.captureServerLogs({ assetId: asset.id })),
@@ -178,7 +178,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
       });
       ev.assert('same asset id returned', res.body?.id === asset.id, { dbDiff: `id=${res.body?.id}` });
       ev.assert('restore status flag = restored', res.body?.status === 'restored');
-      ev.assert('asset back online', restoredInfo.isOffline === false, {
+      ev.assert('asset back online', !restoredInfo.isOffline, {
         dbDiff: `isOffline=${restoredInfo.isOffline}`,
       });
       ev.assert('missing-file report cleared', reportsAfter === 0, { dbDiff: `missing_file reports=${reportsAfter}` });
@@ -256,7 +256,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
       await utils.waitForQueueFinish(admin.accessToken, QueueName.IntegrityCheck);
 
       const offlineInfo = await utils.getAssetInfo(admin.accessToken, asset.id);
-      ev.assert('offline + report after file loss', offlineInfo.isOffline === true, {
+      ev.assert('offline + report after file loss', offlineInfo.isOffline, {
         fileState: formatFileState(await captureFileState(originalPath)),
         dbDiff: `isOffline=${offlineInfo.isOffline}, reports=${await missingReportCount(asset.id)}`,
       });
@@ -341,10 +341,10 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
         serverLog: summarizeLogs(await utils.captureServerLogs({ correlationId: cid })),
         dbDiff: `status=${res.status}, body=${JSON.stringify(res.body)}`,
       });
-      ev.assert('file still absent (never written)', fileAfter.present === false, {
+      ev.assert('file still absent (never written)', !fileAfter.present, {
         fileState: formatFileState(fileAfter),
       });
-      ev.assert('asset still offline + report intact', info.isOffline === true && reports === 1, {
+      ev.assert('asset still offline + report intact', info.isOffline && reports === 1, {
         dbDiff: `isOffline=${info.isOffline}, reports=${reports}`,
       });
 
@@ -381,10 +381,10 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
         serverLog: summarizeLogs(await utils.captureServerLogs({ correlationId: cid })),
         dbDiff: `status=${res.status}, body=${JSON.stringify(res.body)}`,
       });
-      ev.assert('no bytes written for non-owner', fileAfter.present === false, {
+      ev.assert('no bytes written for non-owner', !fileAfter.present, {
         fileState: formatFileState(fileAfter),
       });
-      ev.assert('asset unchanged (still offline)', info.isOffline === true, {
+      ev.assert('asset unchanged (still offline)', info.isOffline, {
         dbDiff: `isOffline=${info.isOffline}`,
       });
 
@@ -416,7 +416,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
       const res = await restore(admin.accessToken, asset.id, bytes, cid);
       const fileAfter = await captureFileState(originalPath);
 
-      ev.assert('file is present before restore attempt', present.present === true, {
+      ev.assert('file is present before restore attempt', present.present, {
         fileState: formatFileState(present),
       });
       ev.assert('restore refused with 409', res.status === 409, {
@@ -518,7 +518,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
       const trashed = await utils.getAssetInfo(admin.accessToken, asset.id);
       const reports = await missingReportCount(asset.id);
 
-      ev.assert('trashed asset not scanned -> not offline, no report', trashed.isOffline === false && reports === 0, {
+      ev.assert('trashed asset not scanned -> not offline, no report', !trashed.isOffline && reports === 0, {
         fileState: formatFileState(await captureFileState(originalPath)),
         dbDiff: `isTrashed=${trashed.isTrashed}, isOffline=${trashed.isOffline}, reports=${reports}`,
       });
@@ -528,8 +528,9 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
         serverLog: summarizeLogs(await utils.captureServerLogs({ correlationId: cid })),
         dbDiff: `status=${res.status}, body=${JSON.stringify(res.body)}`,
       });
-      ev.assert('file remains absent', (await captureFileState(originalPath)).present === false, {
-        fileState: formatFileState(await captureFileState(originalPath)),
+      const fileAfter = await captureFileState(originalPath);
+      ev.assert('file remains absent', !fileAfter.present, {
+        fileState: formatFileState(fileAfter),
       });
 
       expect(trashed.isTrashed).toBe(true);

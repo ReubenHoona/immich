@@ -482,9 +482,7 @@ export class IntegrityService extends BaseService {
       await this.assetRepository.setUploadAssetsOffline(returnedAssetIds, false);
       await this.integrityRepository.deleteByIds(reportIds);
 
-      this.logger.debugFn(
-        () => `Missing-file refresh cleared ${returnedAssetIds.length} upload asset(s) back online`,
-      );
+      this.logger.debugFn(() => `Missing-file refresh cleared ${returnedAssetIds.length} upload asset(s) back online`);
     }
 
     this.logger.log(`Processed ${paths.length} paths and found ${reportIds.length} report(s) out of date.`);
@@ -754,5 +752,4 @@ export class IntegrityService extends BaseService {
     this.logger.log(`Deleted ${reports.length} reports.`);
     return JobStatus.Success;
   }
-
 }
