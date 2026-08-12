@@ -41,10 +41,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
  * Each server-observable scenario emits a correlated cross-layer evidence report to
  * e2e/evidence/<scenario>.md. Scenarios that cannot be scripted in e2e (interrupted write,
  * concurrency, mount-down, old-client, phone) are left as documented `it.todo` markers.
- *
- * NOTE: these specs are authored against the merged feature image; they may not execute in the
- * e2e worktree (which has no server build). Assertions use the raw HTTP surface + SQL + dockerExec
- * so they do not depend on a regenerated SDK for the new endpoint.
  */
 
 const RESTORE_FILENAME = 'restore.png';
@@ -199,7 +195,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
     }
   });
 
-  // ============================ (2) NO-DATA-LOSS proof (headline) ============================
+  // ============================ (2) no-data-loss proof ============================
   it('preserves every FK-attached row and the timeline through a restore', async () => {
     const cid = `mfr-nodataloss-${randomUUID()}`;
     const bytes = makeRandomImage();
@@ -304,7 +300,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
         dbDiff: `isOffline=${after.asset!.isOffline}`,
       });
 
-      // hard assertions (fail the test if the headline claim breaks)
+      // hard assertions (fail the test if any attached data changed)
       expect(res.status).toBe(200);
       expect(comparison.attachedIdentical).toBe(true);
       expect(comparison.unexpectedAssetChanges).toEqual([]);
@@ -587,9 +583,8 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
   });
 
   // ============================ documented TODOs (not scriptable in e2e) ============================
-  // These belong to the matrix but cannot be reliably driven from the e2e harness; they are proven
-  // out-of-band (interrupted/concurrent/mount-down need fault injection; old-client & phone are
-  // client-side). Left as explicit markers so the matrix stays visible.
+  // These cannot be reliably driven from the e2e harness: interrupted/concurrent/mount-down need
+  // fault injection, and old-client & phone behavior is client-side.
   it.todo('(6) interrupted/partial write: kill mid-move -> stays offline, no half-file accepted');
   it.todo('(7) concurrent re-supply: two clients same asset -> one wins, other no-ops safely');
   it.todo('(8) mount-down mid-restore: /data unavailable -> fails safe, stays offline, no partial state');

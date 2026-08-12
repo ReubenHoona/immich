@@ -145,8 +145,6 @@ export class JobRepository {
 
     // Thread a journey/correlation id from the HTTP request that queued this job (if any) into
     // a CLS context, so the `~<id>` log prefix follows the work across the queue boundary.
-    // No-op at prod defaults: jobs carry no correlationId unless a feature (e.g. in-place
-    // original restore) explicitly sets one.
     const correlationId = (data as { correlationId?: string } | undefined)?.correlationId;
     if (this.cls && correlationId) {
       return this.cls.run(() => {

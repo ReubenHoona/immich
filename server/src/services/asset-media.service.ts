@@ -281,7 +281,7 @@ export class AssetMediaService extends BaseService {
         throw new ConflictException('Original file is already present; refusing to overwrite');
       }
 
-      // the invariant that makes this upstream-mergeable: the bytes must hash to the stored checksum
+      // the bytes must hash to the checksum the server already recorded
       if (!file.checksum.equals(asset.checksum)) {
         this.logger.warn(`Restore rejected for asset ${id}: supplied bytes do not match the recorded checksum`);
         throw new BadRequestException('Checksum mismatch: supplied file does not match the asset');

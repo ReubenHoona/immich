@@ -719,7 +719,7 @@ export const utils = {
    * structured lines. When the stack runs with `IMMICH_LOG_LEVEL=verbose` + `IMMICH_LOG_FORMAT=json`
    * each line parses to JSON; otherwise the raw text is preserved. Filtering by `correlationId`
    * (the `~<id>` journey prefix) or `assetId` is a substring match on the raw line, so it works in
-   * both text and JSON log formats. This is the one missing primitive for cross-layer evidence.
+   * both text and JSON log formats.
    */
   captureServerLogs: async (options?: CaptureLogsOptions): Promise<ServerLogLine[]> => {
     const args = ['logs'];

@@ -3,14 +3,11 @@
  *
  * Two responsibilities:
  *  1. Snapshot the full FK-attached graph of an asset straight from Postgres, so a spec can prove
- *     that an in-place restore preserved every attached row byte-for-byte (the headline
- *     "no-data-loss" claim that refutes delete-and-reupload).
+ *     that an in-place restore preserved every attached row byte-for-byte.
  *  2. Accumulate a correlated, cross-layer timeline (server log by correlation id | on-disk
- *     file + sha1 | DB row diff | PASS/FAIL) and emit it as a markdown report per scenario. This
- *     bundle is the PR's reproducible proof artifact.
+ *     file + sha1 | DB row diff | PASS/FAIL) and emit it as a markdown report per scenario.
  *
- * Output lands in `e2e/evidence/<scenario>.md` (git-ignored; produced when the specs run against
- * the merged image).
+ * Output lands in `e2e/evidence/<scenario>.md` (git-ignored).
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -145,7 +142,7 @@ export type GraphComparison = {
 
 /**
  * Compare two snapshots for the no-data-loss claim: all attached collections must be identical, and
- * the only asset-row fields allowed to change are the volatile ones (isOffline / deleteReason).
+ * the only asset-row field allowed to change is the volatile one (isOffline).
  * `files` (thumbnails) are intentionally NOT part of the identity check.
  */
 export const compareAssetGraphs = (before: AssetGraphSnapshot, after: AssetGraphSnapshot): GraphComparison => {
