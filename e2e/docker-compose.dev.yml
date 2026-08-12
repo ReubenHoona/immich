@@ -26,10 +26,6 @@ services:
       DB_DATABASE_NAME: immich
       IMMICH_MACHINE_LEARNING_ENABLED: 'false'
       IMMICH_TELEMETRY_INCLUDE: all
-      # Maximal, machine-parseable observability for the evidence harness (utils.captureServerLogs).
-      # Silent at prod defaults; here we want the full restore journey on stdout as JSON lines.
-      IMMICH_LOG_LEVEL: verbose
-      IMMICH_LOG_FORMAT: json
       IMMICH_ENV: testing
       IMMICH_PORT: '2285'
       IMMICH_IGNORE_MOUNT_CHECK_ERRORS: 'true'
