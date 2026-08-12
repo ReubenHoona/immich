@@ -148,6 +148,8 @@ export const endpointTags: Record<ApiTag, string> = {
   [ApiTag.Albums]: 'An album is a collection of assets that can be shared with other users or via shared links.',
   [ApiTag.ApiKeys]: 'An api key can be used to programmatically access the Immich API.',
   [ApiTag.Assets]: 'An asset is an image or video that has been uploaded to Immich.',
+  [ApiTag.Bursts]:
+    'A burst group is a run of frames the camera captured within a couple of seconds of each other that also look alike.',
   [ApiTag.Authentication]: 'Endpoints related to user authentication, including OAuth.',
   [ApiTag.AuthenticationAdmin]: 'Administrative endpoints related to authentication.',
   [ApiTag.DatabaseBackups]: 'Manage backups of the Immich database.',

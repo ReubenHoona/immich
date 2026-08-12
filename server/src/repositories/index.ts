@@ -7,6 +7,7 @@ import { AppRepository } from 'src/repositories/app.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
+import { BurstRepository } from 'src/repositories/burst.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
@@ -92,6 +93,7 @@ export const repositories = [
   ServerInfoRepository,
   SharedLinkRepository,
   SharedLinkAssetRepository,
+  BurstRepository,
   StackRepository,
   StorageRepository,
   SyncRepository,

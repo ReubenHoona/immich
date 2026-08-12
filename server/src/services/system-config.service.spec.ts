@@ -122,6 +122,12 @@ const updatedConfig = Object.freeze<SystemConfig>({
       enabled: true,
       maxDistance: 0.01,
     },
+    burstDetection: {
+      enabled: false,
+      timeWindowSeconds: 2,
+      maxDistance: 0.12,
+      minAssets: 3,
+    },
     facialRecognition: {
       enabled: true,
       modelName: 'buffalo_l',

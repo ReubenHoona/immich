@@ -5712,6 +5712,216 @@
         "x-immich-state": "Stable"
       }
     },
+    "/burst-groups": {
+      "get": {
+        "description": "Retrieve detected multi-shot burst groups, optionally filtered by status.",
+        "operationId": "searchBurstGroups",
+        "parameters": [
+          {
+            "name": "status",
+            "required": false,
+            "in": "query",
+            "description": "Filter by status",
+            "schema": {
+              "$ref": "#/components/schemas/BurstGroupStatus"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BurstGroupResponseDto"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve burst groups",
+        "tags": [
+          "Bursts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "burstGroup.read"
+      }
+    },
+    "/burst-groups/{id}": {
+      "get": {
+        "description": "Retrieve a single burst group by its ID.",
+        "operationId": "getBurstGroup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BurstGroupResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Retrieve a burst group",
+        "tags": [
+          "Bursts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "burstGroup.read"
+      }
+    },
+    "/burst-groups/{id}/accept": {
+      "post": {
+        "description": "Turn the frames of a candidate burst group into a stack.",
+        "operationId": "acceptBurstGroup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BurstGroupResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Accept a burst group",
+        "tags": [
+          "Bursts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "burstGroup.update"
+      }
+    },
+    "/burst-groups/{id}/dismiss": {
+      "post": {
+        "description": "Reject a candidate burst group so it is not offered again.",
+        "operationId": "dismissBurstGroup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BurstGroupResponseDto"
+                }
+              }
+            },
+            "description": ""
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Dismiss a burst group",
+        "tags": [
+          "Bursts"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3",
+            "state": "Added"
+          }
+        ],
+        "x-immich-permission": "burstGroup.update"
+      }
+    },
     "/download/archive": {
       "post": {
         "description": "Download a ZIP archive containing the specified assets. The assets must have been previously requested via the \"getDownloadInfo\" endpoint.",
@@ -16413,6 +16623,10 @@
       "description": "An asset is an image or video that has been uploaded to Immich."
     },
     {
+      "name": "Bursts",
+      "description": "A burst group is a run of frames the camera captured within a couple of seconds of each other that also look alike."
+    },
+    {
       "name": "Authentication",
       "description": "Endpoints related to user authentication, including OAuth."
     },
@@ -18421,6 +18635,91 @@
         ],
         "type": "object"
       },
+      "BurstDetectionConfig": {
+        "properties": {
+          "enabled": {
+            "description": "Whether the task is enabled",
+            "type": "boolean"
+          },
+          "maxDistance": {
+            "description": "Maximum embedding distance for frames to count as the same subject",
+            "format": "double",
+            "maximum": 0.5,
+            "minimum": 0.001,
+            "type": "number"
+          },
+          "minAssets": {
+            "description": "Minimum number of frames required to form a burst",
+            "maximum": 50,
+            "minimum": 2,
+            "type": "integer"
+          },
+          "timeWindowSeconds": {
+            "description": "Maximum gap between consecutive frames of the same burst, in seconds",
+            "format": "double",
+            "maximum": 10,
+            "minimum": 0.5,
+            "type": "number"
+          }
+        },
+        "required": [
+          "enabled",
+          "maxDistance",
+          "minAssets",
+          "timeWindowSeconds"
+        ],
+        "type": "object"
+      },
+      "BurstGroupResponseDto": {
+        "description": "Burst group response",
+        "properties": {
+          "assets": {
+            "description": "Frames in the burst, closest to the reference first",
+            "items": {
+              "$ref": "#/components/schemas/AssetResponseDto"
+            },
+            "type": "array"
+          },
+          "createdAt": {
+            "description": "Creation date",
+            "type": "string"
+          },
+          "distances": {
+            "description": "Embedding distance of each frame from the reference, aligned with `assets`",
+            "items": {
+              "format": "double",
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "id": {
+            "description": "Burst group ID",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-7[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BurstGroupStatus"
+          }
+        },
+        "required": [
+          "assets",
+          "createdAt",
+          "distances",
+          "id",
+          "status"
+        ],
+        "type": "object"
+      },
+      "BurstGroupStatus": {
+        "description": "Burst group status",
+        "enum": [
+          "candidate",
+          "accepted",
+          "dismissed"
+        ],
+        "type": "string"
+      },
       "CLIPConfig": {
         "properties": {
           "enabled": {
@@ -19437,6 +19736,7 @@
           "AssetDeleteCheck",
           "AssetDetectFacesQueueAll",
           "AssetDetectFaces",
+          "AssetDetectBurstsQueueAll",
           "AssetDetectDuplicatesQueueAll",
           "AssetDetectDuplicates",
           "AssetEditThumbnailGeneration",
@@ -21170,6 +21470,8 @@
           "stack.read",
           "stack.update",
           "stack.delete",
+          "burstGroup.read",
+          "burstGroup.update",
           "sync.stream",
           "syncCheckpoint.read",
           "syncCheckpoint.update",
@@ -21773,7 +22075,8 @@
           "ocr",
           "workflow",
           "integrityCheck",
-          "editor"
+          "editor",
+          "burstDetection"
         ],
         "type": "string"
       },
@@ -21895,6 +22198,9 @@
           "backupDatabase": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
+          "burstDetection": {
+            "$ref": "#/components/schemas/QueueResponseLegacyDto"
+          },
           "duplicateDetection": {
             "$ref": "#/components/schemas/QueueResponseLegacyDto"
           },
@@ -21950,6 +22256,7 @@
         "required": [
           "backgroundTask",
           "backupDatabase",
+          "burstDetection",
           "duplicateDetection",
           "editor",
           "faceDetection",
@@ -26298,6 +26605,9 @@
           "availabilityChecks": {
             "$ref": "#/components/schemas/MachineLearningAvailabilityChecksDto"
           },
+          "burstDetection": {
+            "$ref": "#/components/schemas/BurstDetectionConfig"
+          },
           "clip": {
             "$ref": "#/components/schemas/CLIPConfig"
           },
@@ -26325,6 +26635,7 @@
         },
         "required": [
           "availabilityChecks",
+          "burstDetection",
           "clip",
           "duplicateDetection",
           "enabled",

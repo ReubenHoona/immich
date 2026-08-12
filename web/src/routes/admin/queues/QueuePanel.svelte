@@ -86,6 +86,9 @@
     [QueueName.Migration]: {
       missingText: $t('start'),
     },
+    [QueueName.BurstDetection]: {
+      missingText: $t('start'),
+    },
   };
 
   let queueList = Object.entries(queueDetails) as [QueueName, QueueDetails][];

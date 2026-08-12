@@ -48,6 +48,8 @@ import { AssetMetadataTable } from 'src/schema/tables/asset-metadata.table';
 import { AssetOcrAuditTable } from 'src/schema/tables/asset-ocr-audit.table';
 import { AssetOcrTable } from 'src/schema/tables/asset-ocr.table';
 import { AssetTable } from 'src/schema/tables/asset.table';
+import { BurstGroupAssetTable } from 'src/schema/tables/burst-group-asset.table';
+import { BurstGroupTable } from 'src/schema/tables/burst-group.table';
 import { FaceSearchTable } from 'src/schema/tables/face-search.table';
 import { GeodataPlacesTable } from 'src/schema/tables/geodata-places.table';
 import { IntegrityReportTable } from 'src/schema/tables/integrity-report.table';
@@ -116,6 +118,8 @@ export class ImmichDatabase {
     AssetTable,
     AssetFileTable,
     AssetExifTable,
+    BurstGroupTable,
+    BurstGroupAssetTable,
     FaceSearchTable,
     GeodataPlacesTable,
     IntegrityReportTable,
@@ -217,6 +221,9 @@ export interface DB {
   asset_ocr_audit: AssetOcrAuditTable;
   asset_audio: AssetAudioTable;
   asset_video: AssetVideoTable;
+
+  burst_group: BurstGroupTable;
+  burst_group_asset: BurstGroupAssetTable;
   asset_keyframe: AssetKeyframeTable;
   ocr_search: OcrSearchTable;
 

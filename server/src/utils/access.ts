@@ -310,6 +310,11 @@ const checkOtherAccess = async (access: AccessRepository, request: OtherAccessRe
       return access.session.checkOwnerAccess(auth.user.id, ids);
     }
 
+    case Permission.BurstGroupRead:
+    case Permission.BurstGroupUpdate: {
+      return access.burstGroup.checkOwnerAccess(auth.user.id, ids);
+    }
+
     case Permission.StackRead: {
       return access.stack.checkOwnerAccess(auth.user.id, ids);
     }

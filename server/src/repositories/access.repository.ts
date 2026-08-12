@@ -359,6 +359,26 @@ class SessionAccess {
       .then((sessions) => new Set(sessions.map((session) => session.id)));
   }
 }
+class BurstGroupAccess {
+  constructor(private db: Kysely<DB>) {}
+
+  @GenerateSql({ params: [DummyValue.UUID, DummyValue.UUID_SET] })
+  @ChunkedSet({ paramIndex: 1 })
+  async checkOwnerAccess(userId: string, burstGroupIds: Set<string>) {
+    if (burstGroupIds.size === 0) {
+      return new Set<string>();
+    }
+
+    return this.db
+      .selectFrom('burst_group')
+      .select('burst_group.id')
+      .where('burst_group.id', 'in', [...burstGroupIds])
+      .where('burst_group.ownerId', '=', userId)
+      .execute()
+      .then((groups) => new Set(groups.map((group) => group.id)));
+  }
+}
+
 class StackAccess {
   constructor(private db: Kysely<DB>) {}
 
@@ -523,6 +543,7 @@ export class AccessRepository {
   album: AlbumAccess;
   asset: AssetAccess;
   authDevice: AuthDeviceAccess;
+  burstGroup: BurstGroupAccess;
   duplicate: DuplicateAccess;
   memory: MemoryAccess;
   notification: NotificationAccess;
@@ -539,6 +560,7 @@ export class AccessRepository {
     this.album = new AlbumAccess(db);
     this.asset = new AssetAccess(db);
     this.authDevice = new AuthDeviceAccess(db);
+    this.burstGroup = new BurstGroupAccess(db);
     this.duplicate = new DuplicateAccess(db);
     this.memory = new MemoryAccess(db);
     this.notification = new NotificationAccess(db);

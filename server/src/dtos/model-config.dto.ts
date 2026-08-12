@@ -22,6 +22,22 @@ export const DuplicateDetectionConfigSchema = TaskConfigSchema.extend({
     .describe('Maximum distance threshold for duplicate detection'),
 }).meta({ id: 'DuplicateDetectionConfig' });
 
+export const BurstDetectionConfigSchema = TaskConfigSchema.extend({
+  timeWindowSeconds: z
+    .number()
+    .meta({ format: 'double' })
+    .min(0.5)
+    .max(10)
+    .describe('Maximum gap between consecutive frames of the same burst, in seconds'),
+  maxDistance: z
+    .number()
+    .meta({ format: 'double' })
+    .min(0.001)
+    .max(0.5)
+    .describe('Maximum embedding distance for frames to count as the same subject'),
+  minAssets: z.int().min(2).max(50).describe('Minimum number of frames required to form a burst'),
+}).meta({ id: 'BurstDetectionConfig' });
+
 export const FacialRecognitionConfigSchema = ModelConfigSchema.extend({
   minScore: z
     .number()

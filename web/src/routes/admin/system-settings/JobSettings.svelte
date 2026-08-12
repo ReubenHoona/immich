@@ -50,6 +50,7 @@
     [QueueName.Workflow]: $t('workflows'),
     [QueueName.Editor]: $t('editor'),
     [QueueName.IntegrityCheck]: $t('integrity_checks'),
+    [QueueName.BurstDetection]: $t('admin.machine_learning_burst_detection'),
   });
 </script>
 

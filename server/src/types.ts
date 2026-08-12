@@ -200,6 +200,7 @@ export type ConcurrentQueueName = Exclude<
   | QueueName.FacialRecognition
   | QueueName.DuplicateDetection
   | QueueName.BackupDatabase
+  | QueueName.BurstDetection
 >;
 
 export type Jobs = { [K in JobItem['name']]: (JobItem & { name: K })['data'] };
@@ -381,6 +382,9 @@ export type JobItem =
   // Duplicate Detection
   | { name: JobName.AssetDetectDuplicatesQueueAll; data: IBaseJob }
   | { name: JobName.AssetDetectDuplicates; data: IEntityJob }
+
+  // Burst Detection
+  | { name: JobName.AssetDetectBurstsQueueAll; data: IBaseJob }
 
   // Memories
   | { name: JobName.MemoryCleanup; data?: IBaseJob }

@@ -26,6 +26,7 @@ import { AppRepository } from 'src/repositories/app.repository';
 import { AssetEditRepository } from 'src/repositories/asset-edit.repository';
 import { AssetJobRepository } from 'src/repositories/asset-job.repository';
 import { AssetRepository } from 'src/repositories/asset.repository';
+import { BurstRepository } from 'src/repositories/burst.repository';
 import { ConfigRepository } from 'src/repositories/config.repository';
 import { CronRepository } from 'src/repositories/cron.repository';
 import { CryptoRepository } from 'src/repositories/crypto.repository';
@@ -267,6 +268,7 @@ export type ServiceOverrides = {
   sharedLink: SharedLinkRepository;
   sharedLinkAsset: SharedLinkAssetRepository;
   stack: StackRepository;
+  burst: BurstRepository;
   storage: StorageRepository;
   sync: SyncRepository;
   syncCheckpoint: SyncCheckpointRepository;
@@ -351,6 +353,7 @@ export const getMocks = () => {
     sharedLink: automock(SharedLinkRepository),
     sharedLinkAsset: automock(SharedLinkAssetRepository),
     stack: automock(StackRepository),
+    burst: automock(BurstRepository),
     storage: newStorageRepositoryMock(),
     sync: automock(SyncRepository),
     syncCheckpoint: automock(SyncCheckpointRepository),
@@ -419,6 +422,7 @@ export const newTestService = <T extends BaseService>(
     overrides.sharedLink || (mocks.sharedLink as As<SharedLinkRepository>),
     overrides.sharedLinkAsset || (mocks.sharedLinkAsset as As<SharedLinkAssetRepository>),
     overrides.stack || (mocks.stack as As<StackRepository>),
+    overrides.burst || (mocks.burst as As<BurstRepository>),
     overrides.storage || (mocks.storage as As<StorageRepository>),
     overrides.sync || (mocks.sync as As<SyncRepository>),
     overrides.syncCheckpoint || (mocks.syncCheckpoint as As<SyncCheckpointRepository>),

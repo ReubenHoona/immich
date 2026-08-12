@@ -2,6 +2,7 @@ import { validateCronExpression } from 'cron';
 import { createZodDto } from 'nestjs-zod';
 import { SystemConfig } from 'src/config';
 import {
+  BurstDetectionConfigSchema,
   CLIPConfigSchema,
   DuplicateDetectionConfigSchema,
   FacialRecognitionConfigSchema,
@@ -185,6 +186,7 @@ const SystemConfigMachineLearningSchema = z
     availabilityChecks: MachineLearningAvailabilityChecksSchema,
     clip: CLIPConfigSchema,
     duplicateDetection: DuplicateDetectionConfigSchema,
+    burstDetection: BurstDetectionConfigSchema,
     facialRecognition: FacialRecognitionConfigSchema,
     ocr: OcrConfigSchema,
   })

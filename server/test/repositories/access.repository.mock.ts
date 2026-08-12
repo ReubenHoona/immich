@@ -58,6 +58,10 @@ export const newAccessRepositoryMock = (): IAccessRepositoryMock => {
       checkOwnerAccess: vitest.fn().mockResolvedValue(new Set()),
     },
 
+    burstGroup: {
+      checkOwnerAccess: vitest.fn().mockResolvedValue(new Set()),
+    },
+
     stack: {
       checkOwnerAccess: vitest.fn().mockResolvedValue(new Set()),
     },

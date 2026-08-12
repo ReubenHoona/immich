@@ -158,6 +158,15 @@ where
   "session"."userId" = $1
   and "session"."id" in ($2)
 
+-- AccessRepository.burstGroup.checkOwnerAccess
+select
+  "burst_group"."id"
+from
+  "burst_group"
+where
+  "burst_group"."id" in ($1)
+  and "burst_group"."ownerId" = $2
+
 -- AccessRepository.duplicate.checkOwnerAccess
 select
   "asset"."duplicateId"

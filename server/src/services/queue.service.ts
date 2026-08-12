@@ -245,6 +245,10 @@ export class QueueService extends BaseService {
         return this.jobRepository.queue({ name: JobName.OcrQueueAll, data: { force } });
       }
 
+      case QueueName.BurstDetection: {
+        return this.jobRepository.queue({ name: JobName.AssetDetectBurstsQueueAll, data: { force } });
+      }
+
       default: {
         throw new BadRequestException(`Invalid job name: ${name}`);
       }
@@ -257,6 +261,8 @@ export class QueueService extends BaseService {
       QueueName.StorageTemplateMigration,
       QueueName.DuplicateDetection,
       QueueName.BackupDatabase,
+      // one sweep at a time: the detector walks the library in capture order
+      QueueName.BurstDetection,
     ].includes(name);
   }
 

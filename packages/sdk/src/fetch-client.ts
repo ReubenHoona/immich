@@ -1113,6 +1113,17 @@ export type ValidateAccessTokenResponseDto = {
     /** Authentication status */
     authStatus: boolean;
 };
+export type BurstGroupResponseDto = {
+    /** Frames in the burst, closest to the reference first */
+    assets: AssetResponseDto[];
+    /** Creation date */
+    createdAt: string;
+    /** Embedding distance of each frame from the reference, aligned with `assets` */
+    distances: number[];
+    /** Burst group ID */
+    id: string;
+    status: BurstGroupStatus;
+};
 export type DownloadArchiveDto = {
     /** Asset IDs */
     assetIds: string[];
@@ -1231,6 +1242,7 @@ export type QueueResponseLegacyDto = {
 export type QueuesResponseLegacyDto = {
     backgroundTask: QueueResponseLegacyDto;
     backupDatabase: QueueResponseLegacyDto;
+    burstDetection: QueueResponseLegacyDto;
     duplicateDetection: QueueResponseLegacyDto;
     editor: QueueResponseLegacyDto;
     faceDetection: QueueResponseLegacyDto;
@@ -2439,6 +2451,16 @@ export type MachineLearningAvailabilityChecksDto = {
     interval: number;
     timeout: number;
 };
+export type BurstDetectionConfig = {
+    /** Whether the task is enabled */
+    enabled: boolean;
+    /** Maximum embedding distance for frames to count as the same subject */
+    maxDistance: number;
+    /** Minimum number of frames required to form a burst */
+    minAssets: number;
+    /** Maximum gap between consecutive frames of the same burst, in seconds */
+    timeWindowSeconds: number;
+};
 export type ClipConfig = {
     /** Whether the task is enabled */
     enabled: boolean;
@@ -2477,6 +2499,7 @@ export type OcrConfig = {
 };
 export type SystemConfigMachineLearningDto = {
     availabilityChecks: MachineLearningAvailabilityChecksDto;
+    burstDetection: BurstDetectionConfig;
     clip: ClipConfig;
     duplicateDetection: DuplicateDetectionConfig;
     /** Enabled */
@@ -4681,6 +4704,62 @@ export function validateAccessToken(opts?: Oazapfts.RequestOpts) {
         status: 200;
         data: ValidateAccessTokenResponseDto;
     }>("/auth/validateToken", {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Retrieve burst groups
+ */
+export function searchBurstGroups({ status }: {
+    status?: BurstGroupStatus;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: BurstGroupResponseDto[];
+    }>(`/burst-groups${QS.query(QS.explode({
+        status
+    }))}`, {
+        ...opts
+    }));
+}
+/**
+ * Retrieve a burst group
+ */
+export function getBurstGroup({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: BurstGroupResponseDto;
+    }>(`/burst-groups/${encodeURIComponent(id)}`, {
+        ...opts
+    }));
+}
+/**
+ * Accept a burst group
+ */
+export function acceptBurstGroup({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 201;
+        data: BurstGroupResponseDto;
+    }>(`/burst-groups/${encodeURIComponent(id)}/accept`, {
+        ...opts,
+        method: "POST"
+    }));
+}
+/**
+ * Dismiss a burst group
+ */
+export function dismissBurstGroup({ id }: {
+    id: string;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: BurstGroupResponseDto;
+    }>(`/burst-groups/${encodeURIComponent(id)}/dismiss`, {
         ...opts,
         method: "POST"
     }));
@@ -7331,6 +7410,8 @@ export enum Permission {
     StackRead = "stack.read",
     StackUpdate = "stack.update",
     StackDelete = "stack.delete",
+    BurstGroupRead = "burstGroup.read",
+    BurstGroupUpdate = "burstGroup.update",
     SyncStream = "sync.stream",
     SyncCheckpointRead = "syncCheckpoint.read",
     SyncCheckpointUpdate = "syncCheckpoint.update",
@@ -7416,6 +7497,11 @@ export enum AssetMediaSize {
     Preview = "preview",
     Thumbnail = "thumbnail"
 }
+export enum BurstGroupStatus {
+    Candidate = "candidate",
+    Accepted = "accepted",
+    Dismissed = "dismissed"
+}
 export enum SourceType {
     MachineLearning = "machine-learning",
     Exif = "exif",
@@ -7457,7 +7543,8 @@ export enum QueueName {
     Ocr = "ocr",
     Workflow = "workflow",
     IntegrityCheck = "integrityCheck",
-    Editor = "editor"
+    Editor = "editor",
+    BurstDetection = "burstDetection"
 }
 export enum QueueCommand {
     Start = "start",
@@ -7499,6 +7586,7 @@ export enum JobName {
     AssetDeleteCheck = "AssetDeleteCheck",
     AssetDetectFacesQueueAll = "AssetDetectFacesQueueAll",
     AssetDetectFaces = "AssetDetectFaces",
+    AssetDetectBurstsQueueAll = "AssetDetectBurstsQueueAll",
     AssetDetectDuplicatesQueueAll = "AssetDetectDuplicatesQueueAll",
     AssetDetectDuplicates = "AssetDetectDuplicates",
     AssetEditThumbnailGeneration = "AssetEditThumbnailGeneration",

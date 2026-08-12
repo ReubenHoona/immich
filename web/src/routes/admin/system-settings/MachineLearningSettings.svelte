@@ -176,6 +176,62 @@
       </SettingAccordion>
 
       <SettingAccordion
+        key="burst-detection"
+        title={$t('admin.machine_learning_burst_detection')}
+        subtitle={$t('admin.machine_learning_burst_detection_setting_description')}
+      >
+        <div class="ms-4 mt-4 flex flex-col gap-4">
+          <SettingSwitch
+            title={$t('admin.machine_learning_burst_detection_enabled')}
+            subtitle={$t('admin.machine_learning_burst_detection_enabled_description')}
+            bind:checked={configToEdit.machineLearning.burstDetection.enabled}
+            disabled={disabled || !configToEdit.machineLearning.enabled || !configToEdit.machineLearning.clip.enabled}
+          />
+
+          <hr />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_burst_time_window')}
+            bind:value={configToEdit.machineLearning.burstDetection.timeWindowSeconds}
+            step="0.5"
+            min={0.5}
+            max={10}
+            description={$t('admin.machine_learning_burst_time_window_description')}
+            disabled={disabled || !configToEdit.machineLearning.burstDetection.enabled}
+            isEdited={configToEdit.machineLearning.burstDetection.timeWindowSeconds !==
+              config.machineLearning.burstDetection.timeWindowSeconds}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_burst_max_distance')}
+            bind:value={configToEdit.machineLearning.burstDetection.maxDistance}
+            step="0.005"
+            min={0.001}
+            max={0.5}
+            description={$t('admin.machine_learning_burst_max_distance_description')}
+            disabled={disabled || !configToEdit.machineLearning.burstDetection.enabled}
+            isEdited={configToEdit.machineLearning.burstDetection.maxDistance !==
+              config.machineLearning.burstDetection.maxDistance}
+          />
+
+          <SettingInputField
+            inputType={SettingInputFieldType.NUMBER}
+            label={$t('admin.machine_learning_burst_min_assets')}
+            bind:value={configToEdit.machineLearning.burstDetection.minAssets}
+            step="1"
+            min={2}
+            max={50}
+            description={$t('admin.machine_learning_burst_min_assets_description')}
+            disabled={disabled || !configToEdit.machineLearning.burstDetection.enabled}
+            isEdited={configToEdit.machineLearning.burstDetection.minAssets !==
+              config.machineLearning.burstDetection.minAssets}
+          />
+        </div>
+      </SettingAccordion>
+
+      <SettingAccordion
         key="facial-recognition"
         title={$t('admin.machine_learning_facial_recognition')}
         subtitle={$t('admin.machine_learning_facial_recognition_description')}

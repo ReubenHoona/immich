@@ -250,6 +250,9 @@ export enum Permission {
   StackUpdate = 'stack.update',
   StackDelete = 'stack.delete',
 
+  BurstGroupRead = 'burstGroup.read',
+  BurstGroupUpdate = 'burstGroup.update',
+
   SyncStream = 'sync.stream',
   SyncCheckpointRead = 'syncCheckpoint.read',
   SyncCheckpointUpdate = 'syncCheckpoint.update',
@@ -408,6 +411,20 @@ export enum IntegrityReport {
   MissingFile = 'missing_file',
   ChecksumFail = 'checksum_mismatch',
 }
+
+export enum BurstGroupStatus {
+  /** detected, waiting for the user to accept or dismiss */
+  Candidate = 'candidate',
+  /** accepted — the frames were turned into a stack */
+  Accepted = 'accepted',
+  /** rejected by the user; never offered again */
+  Dismissed = 'dismissed',
+}
+
+export const BurstGroupStatusSchema = z
+  .enum(BurstGroupStatus)
+  .describe('Burst group status')
+  .meta({ id: 'BurstGroupStatus' });
 
 export const IntegrityReportSchema = z
   .enum(IntegrityReport)
@@ -811,6 +828,7 @@ export enum QueueName {
   Workflow = 'workflow',
   IntegrityCheck = 'integrityCheck',
   Editor = 'editor',
+  BurstDetection = 'burstDetection',
 }
 
 export const QueueNameSchema = z.enum(QueueName).describe('Queue name').meta({ id: 'QueueName' });
@@ -831,6 +849,7 @@ export enum JobName {
   AssetDeleteCheck = 'AssetDeleteCheck',
   AssetDetectFacesQueueAll = 'AssetDetectFacesQueueAll',
   AssetDetectFaces = 'AssetDetectFaces',
+  AssetDetectBurstsQueueAll = 'AssetDetectBurstsQueueAll',
   AssetDetectDuplicatesQueueAll = 'AssetDetectDuplicatesQueueAll',
   AssetDetectDuplicates = 'AssetDetectDuplicates',
   AssetEditThumbnailGeneration = 'AssetEditThumbnailGeneration',
@@ -1178,6 +1197,7 @@ export enum ApiTag {
   Authentication = 'Authentication',
   AuthenticationAdmin = 'Authentication (admin)',
   Assets = 'Assets',
+  Bursts = 'Bursts',
   DatabaseBackups = 'Database Backups (admin)',
   Deprecated = 'Deprecated',
   Download = 'Download',

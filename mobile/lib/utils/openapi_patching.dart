@@ -33,6 +33,17 @@ final Map<String, Map<String, Object?>> openApiPatches = {
     'mapDarkStyleUrl': 'https://tiles.immich.cloud/v1/style/dark.json',
     'minFaces': 3,
   },
+  // Admin-only DTOs the app never calls, but the coverage test requires a default for any
+  // newly-required property so an older app can still parse a newer server's response.
+  'SystemConfigMachineLearningDto': {
+    'burstDetection': {'enabled': false, 'timeWindowSeconds': 2, 'maxDistance': 0.12, 'minAssets': 3},
+  },
+  'QueuesResponseLegacyDto': {
+    'burstDetection': {
+      'jobCounts': {'active': 0, 'completed': 0, 'delayed': 0, 'failed': 0, 'paused': 0, 'waiting': 0},
+      'queueStatus': {'isActive': false, 'isPaused': false},
+    },
+  },
   'UserResponseDto': {'profileChangedAt': _now},
   'AssetResponseDto': {'visibility': 'timeline', 'createdAt': _now, 'isEdited': false},
   'UserAdminResponseDto': {'profileChangedAt': _now},

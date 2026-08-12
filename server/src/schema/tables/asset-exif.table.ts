@@ -41,7 +41,8 @@ export class AssetExifTable {
   @Column({ type: 'character varying', nullable: true })
   orientation!: string | null;
 
-  @Column({ type: 'timestamp with time zone', nullable: true })
+  // indexed: burst detection range-scans this when pulling in a shot's RAW twin
+  @Column({ type: 'timestamp with time zone', nullable: true, index: true })
   dateTimeOriginal!: Timestamp | null;
 
   @Column({ type: 'timestamp with time zone', nullable: true })
