@@ -67,6 +67,23 @@ void main() {
       expect(result.processing, 0);
     });
 
+    test('trashed offline asset does not count as remainder', () async {
+      final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+      final remote = await ctx.newRemoteAsset(
+        ownerId: userId,
+        isOffline: true,
+        libraryIdOption: const Option.none(),
+        deletedAt: DateTime(2026, 8, 1),
+      );
+      final local = await ctx.newLocalAsset(checksum: remote.checksum);
+      await ctx.newLocalAlbumAsset(albumId: album.id, assetId: local.id);
+
+      final result = await sut.getAllCounts(userId);
+      expect(result.total, 1);
+      // the server refuses to restore a trashed asset, so it is not pending backup work
+      expect(result.remainder, 0);
+    });
+
     test('asset with null checksum is counted as processing', () async {
       final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
       final asset = await ctx.newLocalAsset(checksumOption: const Option.none());
@@ -187,6 +204,21 @@ void main() {
       // The offline server asset id is threaded so the upload heals it in place via
       // PUT /assets/:id/original instead of creating a new asset.
       expect(result.first.remoteId, remote.id);
+    });
+
+    test('excludes an offline asset that has been trashed (server refuses to restore it)', () async {
+      final album = await ctx.newLocalAlbum(backupSelection: BackupSelection.selected);
+      final remote = await ctx.newRemoteAsset(
+        ownerId: userId,
+        isOffline: true,
+        libraryIdOption: const Option.none(),
+        deletedAt: DateTime(2026, 8, 1),
+      );
+      final local = await ctx.newLocalAsset(checksum: remote.checksum);
+      await ctx.newLocalAlbumAsset(albumId: album.id, assetId: local.id);
+
+      final result = await sut.getCandidates(userId);
+      expect(result, isEmpty);
     });
 
     test('includes asset backed up for a different user', () async {

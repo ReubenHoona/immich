@@ -494,13 +494,8 @@ describe(AssetMediaService.name, () => {
 
     it('should restore the missing original in place, clear offline, drop the report and requeue thumbnails', async () => {
       mocks.asset.getById.mockResolvedValue(offlineAsset);
-      // false pre-move (eligibility: original is missing), true post-move (moveFile placed the bytes)
+      // false pre-move (eligibility: original is missing), true post-move (rename placed the bytes)
       mocks.storage.checkFileExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-      mocks.move.create.mockResolvedValue({
-        id: 'move-1',
-        oldPath: restoreFile.originalPath,
-        newPath: offlineAsset.originalPath,
-      } as any);
 
       await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).resolves.toEqual({
         id: 'asset-1',
@@ -516,6 +511,36 @@ describe(AssetMediaService.name, () => {
       });
     });
 
+    it('should fall back to copy + verify + delete when rename crosses devices', async () => {
+      mocks.asset.getById.mockResolvedValue(offlineAsset);
+      mocks.storage.checkFileExists.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      mocks.storage.rename.mockRejectedValue(Object.assign(new Error('cross-device'), { code: 'EXDEV' }));
+      mocks.storage.stat.mockResolvedValue({ size: restoreFile.size } as any);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).resolves.toEqual({
+        id: 'asset-1',
+        status: AssetMediaStatus.RESTORED,
+      });
+
+      expect(mocks.storage.copyFile).toHaveBeenCalledWith(restoreFile.originalPath, offlineAsset.originalPath);
+      expect(mocks.storage.unlink).toHaveBeenCalledWith(restoreFile.originalPath);
+      expect(mocks.asset.update).toHaveBeenCalledWith({ id: 'asset-1', isOffline: false });
+    });
+
+    it('should remove a bad cross-device copy and keep the asset offline', async () => {
+      mocks.asset.getById.mockResolvedValue(offlineAsset);
+      mocks.storage.checkFileExists.mockResolvedValueOnce(false);
+      mocks.storage.rename.mockRejectedValue(Object.assign(new Error('cross-device'), { code: 'EXDEV' }));
+      mocks.storage.stat.mockResolvedValue({ size: restoreFile.size + 1 } as any);
+
+      await expect(sut.restoreAssetOriginal(authStub.user1, 'asset-1', restoreFile)).rejects.toBeInstanceOf(
+        InternalServerErrorException,
+      );
+
+      expect(mocks.storage.unlink).toHaveBeenCalledWith(offlineAsset.originalPath);
+      expect(mocks.asset.update).not.toHaveBeenCalled();
+    });
+
     it('should reject a checksum mismatch with 400 and never touch the asset row', async () => {
       mocks.asset.getById.mockResolvedValue({ ...offlineAsset, checksum: Buffer.from('other hash', 'utf8') });
       mocks.storage.checkFileExists.mockResolvedValue(false);
@@ -524,7 +549,6 @@ describe(AssetMediaService.name, () => {
         BadRequestException,
       );
 
-      expect(mocks.move.create).not.toHaveBeenCalled();
       expect(mocks.storage.rename).not.toHaveBeenCalled();
       expect(mocks.asset.update).not.toHaveBeenCalled();
       // the rejected temp upload is discarded, the asset's own file is left untouched
@@ -542,7 +566,7 @@ describe(AssetMediaService.name, () => {
         ConflictException,
       );
 
-      expect(mocks.move.create).not.toHaveBeenCalled();
+      expect(mocks.storage.rename).not.toHaveBeenCalled();
       expect(mocks.asset.update).not.toHaveBeenCalled();
     });
 
@@ -554,7 +578,7 @@ describe(AssetMediaService.name, () => {
       );
 
       expect(mocks.storage.checkFileExists).not.toHaveBeenCalled();
-      expect(mocks.move.create).not.toHaveBeenCalled();
+      expect(mocks.storage.rename).not.toHaveBeenCalled();
     });
 
     it('should reject a library asset in place', async () => {
@@ -564,7 +588,7 @@ describe(AssetMediaService.name, () => {
         BadRequestException,
       );
 
-      expect(mocks.move.create).not.toHaveBeenCalled();
+      expect(mocks.storage.rename).not.toHaveBeenCalled();
     });
 
     it('should 404 when the asset does not exist', async () => {

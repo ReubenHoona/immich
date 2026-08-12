@@ -26,7 +26,6 @@ import { AssetDownloadOriginalDto } from 'src/dtos/asset.dto';
 import { AuthDto } from 'src/dtos/auth.dto';
 import {
   AssetFileType,
-  AssetPathType,
   AssetVisibility,
   CacheControl,
   ChecksumAlgorithm,
@@ -289,17 +288,29 @@ export class AssetMediaService extends BaseService {
 
       this.logger.verboseFn(() => `Restore checksum verified for asset ${id}; moving bytes into place`);
 
-      // move the verified temp file onto the asset's EXISTING originalPath (no re-templating);
-      // StorageCore handles cross-device moves (EXDEV → copy + verify + delete) and crash recovery
-      await this.storageCore.moveFile({
-        entityId: asset.id,
-        pathType: AssetPathType.Original,
-        oldPath: file.originalPath,
-        newPath: asset.originalPath,
-        assetInfo: { sizeInBytes: file.size, checksum: asset.checksum },
-      });
-      // moveFile has branches that silently return without placing the file (verification failure,
-      // non-EXDEV rename error, size mismatch); assert the bytes actually landed before clearing state
+      // Place the verified temp file onto the asset's EXISTING originalPath (no re-templating).
+      // StorageCore.moveFile is deliberately not used: it trusts an existing move_history row
+      // over the supplied source path (a stale row from an interrupted storage-template
+      // migration would make every restore attempt fail), and concurrent calls race its
+      // get-then-create on the move table's unique constraint. A concurrent restore here is
+      // benign instead — both uploads carry checksum-identical bytes.
+      try {
+        await this.storageRepository.rename(file.originalPath, asset.originalPath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException)?.code !== 'EXDEV') {
+          throw error;
+        }
+        // cross-device: copy, verify the copy, then remove the temp
+        await this.storageRepository.copyFile(file.originalPath, asset.originalPath);
+        const copied = await this.storageRepository.stat(asset.originalPath).catch(() => null);
+        if (copied?.size !== file.size) {
+          await this.storageRepository.unlink(asset.originalPath);
+          throw new InternalServerErrorException(`Restore failed: file was not placed at ${asset.originalPath}`);
+        }
+        await this.storageRepository.unlink(file.originalPath);
+      }
+
+      // assert the bytes actually landed before clearing any state
       if (!(await this.storageRepository.checkFileExists(asset.originalPath))) {
         throw new InternalServerErrorException(`Restore failed: file was not placed at ${asset.originalPath}`);
       }

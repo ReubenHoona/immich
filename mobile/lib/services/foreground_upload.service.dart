@@ -389,6 +389,11 @@ class ForegroundUploadService {
       );
 
       if (result.isSuccess && result.remoteAssetId != null) {
+        if (restoreAssetId != null) {
+          // the server cleared isOffline; mirror it locally so a backup re-run before the next
+          // sync pass does not re-emit this asset as a restore candidate
+          await _backupRepository.markRemoteAssetOnline(restoreAssetId);
+        }
         callbacks.onSuccess?.call(asset.localId!, result.remoteAssetId!);
       } else if (result.isCancelled) {
         shouldAbortUpload = true;

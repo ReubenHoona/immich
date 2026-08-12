@@ -171,6 +171,26 @@ void main() {
       expect(captured[0].containsKey('visibility'), isFalse);
     });
 
+    test('marks the healed asset online locally after a successful in-place restore', () async {
+      final asset = LocalAssetStub.image1;
+      final mockEntity = MockAssetEntity();
+      final stillFile = File('/path/to/photo.jpg');
+
+      when(() => mockEntity.isLivePhoto).thenReturn(false);
+      when(() => mockStorageRepository.getAssetEntityForAsset(asset)).thenAnswer((_) async => mockEntity);
+      when(() => mockStorageRepository.isAssetAvailableLocally(asset.id)).thenAnswer((_) async => true);
+      when(() => mockStorageRepository.getFileForAsset(asset.id)).thenAnswer((_) async => stillFile);
+      when(() => mockAssetMediaRepository.getOriginalFilename(asset.id)).thenAnswer((_) async => 'photo.jpg');
+      when(() => mockBackupRepository.markRemoteAssetOnline(any())).thenAnswer((_) async {});
+
+      captureFields();
+
+      await sut.uploadSingleAsset(asset, null, callbacks: const UploadCallbacks(), restoreAssetId: 'remote-asset-1');
+
+      // a backup re-run before the next sync pass must not re-emit this asset as a candidate
+      verify(() => mockBackupRepository.markRemoteAssetOnline('remote-asset-1')).called(1);
+    });
+
     test('corrects the extension when iOS returns a rendered file for a .dng asset', () async {
       final asset = LocalAssetStub.image1;
       final mockEntity = MockAssetEntity();

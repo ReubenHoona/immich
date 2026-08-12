@@ -13,12 +13,12 @@ import { NextFunction, RequestHandler } from 'express';
 import multer from 'multer';
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { pipeline, Writable } from 'node:stream';
-import { pipeline as pipelineAsync } from 'node:stream/promises';
+import { pipeline } from 'node:stream';
 import { Observable } from 'rxjs';
 import { UploadFieldName } from 'src/dtos/asset-media.dto';
 import { RouteKey } from 'src/enum';
 import { AuthRequest } from 'src/middleware/auth.guard';
+import { CryptoRepository } from 'src/repositories/crypto.repository';
 import { LoggingRepository } from 'src/repositories/logging.repository';
 import { StorageRepository } from 'src/repositories/storage.repository';
 import { AssetMediaService } from 'src/services/asset-media.service';
@@ -49,12 +49,14 @@ export class FileUploadInterceptor implements NestInterceptor {
   private handlers: {
     userProfile: RequestHandler;
     assetUpload: RequestHandler;
+    assetRestore: RequestHandler;
   };
 
   constructor(
     private reflect: Reflector,
     private assetService: AssetMediaService,
     private storageRepository: StorageRepository,
+    private cryptoRepository: CryptoRepository,
     private logger: LoggingRepository,
   ) {
     this.logger.setContext(FileUploadInterceptor.name);
@@ -73,14 +75,18 @@ export class FileUploadInterceptor implements NestInterceptor {
         { name: UploadFieldName.ASSET_DATA, maxCount: 1 },
         { name: UploadFieldName.SIDECAR_DATA, maxCount: 1 },
       ]),
+      // the restore endpoint takes a bare original only; an accepted-but-unread sidecar part
+      // would be written to disk with nothing ever consuming or deleting it
+      assetRestore: instance.fields([{ name: UploadFieldName.ASSET_DATA, maxCount: 1 }]),
     };
   }
 
   async intercept(context: ExecutionContext, next: CallHandler<any>): Promise<Observable<any>> {
     const context_ = context.switchToHttp();
     const route = this.reflect.get<string>(PATH_METADATA, context.getClass());
+    const endpoint = this.reflect.get<string>(PATH_METADATA, context.getHandler());
 
-    const handler: RequestHandler | null = this.getHandler(route as RouteKey);
+    const handler: RequestHandler | null = this.getHandler(route as RouteKey, endpoint);
     if (handler) {
       await new Promise<void>((resolve, reject) => {
         const next: NextFunction = (error) => (error ? reject(transformException(error)) : resolve());
@@ -135,19 +141,31 @@ export class FileUploadInterceptor implements NestInterceptor {
       pipeline(file.stream, writeStream, (error) => {
         if (error) {
           hash?.destroy();
-          return callback(error);
+          return this.failUpload(path, error, callback);
         }
         if (size === 0) {
-          return callback(new BadRequestException('File is empty'));
+          return this.failUpload(path, new BadRequestException('File is empty'), callback);
         }
         const checksum = hash?.digest();
         this.verifyWrittenFile(path, size, checksum)
           .then(() => callback(null, { path, size, checksum }))
-          .catch((error: Error) => callback(error));
+          .catch((error: Error) => this.failUpload(path, error, callback));
       });
     } catch (error: Error | any) {
       callback(error);
     }
+  }
+
+  /**
+   * Fail the upload AND remove whatever reached the disk. Multer only unlinks files it was
+   * told about via the success callback, so an error after the write stream opened would
+   * otherwise leave the (partial or unverified) file behind as an untracked-file orphan.
+   */
+  private failUpload(path: string, error: Error, callback: Callback<Partial<ImmichFile>>) {
+    this.storageRepository
+      .unlink(path)
+      .catch((unlinkError) => this.logger.warn(`Unable to remove failed upload ${path}: ${unlinkError}`))
+      .finally(() => callback(error));
   }
 
   /**
@@ -168,17 +186,8 @@ export class FileUploadInterceptor implements NestInterceptor {
     }
 
     if (rehash && checksum) {
-      const diskHash = createHash('sha1');
-      await pipelineAsync(
-        this.storageRepository.createPlainReadStream(path),
-        new Writable({
-          write(chunk, _encoding, done) {
-            diskHash.update(chunk);
-            done();
-          },
-        }),
-      );
-      if (!diskHash.digest().equals(checksum)) {
+      const diskHash = await this.cryptoRepository.hashFile(path);
+      if (!diskHash.equals(checksum)) {
         throw new InternalServerErrorException(`Upload verification failed: on-disk checksum mismatch for ${path}`);
       }
     }
@@ -191,10 +200,10 @@ export class FileUploadInterceptor implements NestInterceptor {
       .catch(callback);
   }
 
-  private getHandler(route: RouteKey) {
+  private getHandler(route: RouteKey, endpoint?: string) {
     switch (route) {
       case RouteKey.Asset: {
-        return this.handlers.assetUpload;
+        return endpoint === ':id/original' ? this.handlers.assetRestore : this.handlers.assetUpload;
       }
 
       case RouteKey.User: {

@@ -14,6 +14,8 @@
   const disabled = $derived(featureFlagsManager.value.configFile);
   const config = $derived(systemConfigManager.value);
   let configToEdit = $state(systemConfigManager.cloneValue());
+
+  const cronLink = (expression: string) => `https://crontab.guru/#${expression.replaceAll(' ', '_')}`;
 </script>
 
 <div>
@@ -45,9 +47,7 @@
                 <p class="text-sm dark:text-immich-dark-fg">
                   <FormatMessage key="admin.cron_expression_description">
                     {#snippet children({ message })}
-                      <Link
-                        href="https://crontab.guru/#{configToEdit.backup.database.cronExpression.replaceAll(' ', '_')}"
-                      >
+                      <Link href={cronLink(configToEdit.integrityChecks.missingFiles.cronExpression)}>
                         {message}
                         <br />
                       </Link>
@@ -84,9 +84,7 @@
                 <p class="text-sm dark:text-immich-dark-fg">
                   <FormatMessage key="admin.cron_expression_description">
                     {#snippet children({ message })}
-                      <Link
-                        href="https://crontab.guru/#{configToEdit.backup.database.cronExpression.replaceAll(' ', '_')}"
-                      >
+                      <Link href={cronLink(configToEdit.integrityChecks.untrackedFiles.cronExpression)}>
                         {message}
                         <br />
                       </Link>
@@ -123,9 +121,7 @@
                 <p class="text-sm dark:text-immich-dark-fg">
                   <FormatMessage key="admin.cron_expression_description">
                     {#snippet children({ message })}
-                      <Link
-                        href="https://crontab.guru/#{configToEdit.backup.database.cronExpression.replaceAll(' ', '_')}"
-                      >
+                      <Link href={cronLink(configToEdit.integrityChecks.checksumFiles.cronExpression)}>
                         {message}
                         <br />
                       </Link>
@@ -185,9 +181,7 @@
                 <p class="text-sm dark:text-immich-dark-fg">
                   <FormatMessage key="admin.cron_expression_description">
                     {#snippet children({ message })}
-                      <Link
-                        href="https://crontab.guru/#{configToEdit.backup.database.cronExpression.replaceAll(' ', '_')}"
-                      >
+                      <Link href={cronLink(configToEdit.integrityChecks.notifications.cronExpression)}>
                         {message}
                         <br />
                       </Link>

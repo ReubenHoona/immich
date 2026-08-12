@@ -408,11 +408,27 @@ export class IntegrityService extends BaseService {
         try {
           await this.storageRepository.stat(item.path);
           return { ...item, exists: true };
-        } catch {
-          return { ...item, exists: false };
+        } catch (error) {
+          // Only a definitive not-found means the file is missing. Any other stat failure
+          // (EACCES, EIO, an unreachable network mount) says nothing about the file, and
+          // counting it as missing would flip entire libraries offline on a transient error.
+          const code = (error as NodeJS.ErrnoException)?.code;
+          if (code === 'ENOENT' || code === 'ENOTDIR') {
+            return { ...item, exists: false };
+          }
+          this.logger.warn(`Unable to stat ${item.path} (${code ?? error}); skipping`);
+          return { ...item, exists: undefined };
         }
       }),
     );
+
+    // Clear the offline flag before touching report rows: if this job dies mid-way, an asset
+    // whose file has returned must not be left offline with its report already deleted —
+    // without a report, the back-online filter below could never re-arm for it.
+    const backOnlineAssetIds = results
+      .filter(({ exists, reportId, assetId }) => exists && reportId && assetId)
+      .map(({ assetId }) => assetId!);
+    await this.assetRepository.setUploadAssetsOffline(backOnlineAssetIds, false);
 
     const outdatedReports = results
       .filter(({ exists, reportId }) => exists && reportId)
@@ -422,7 +438,7 @@ export class IntegrityService extends BaseService {
       await this.integrityRepository.deleteByIds(outdatedReports);
     }
 
-    const missingFiles = results.filter(({ exists }) => !exists);
+    const missingFiles = results.filter(({ exists }) => exists === false);
     if (missingFiles.length > 0) {
       await this.integrityRepository.create(
         missingFiles.map(({ path, assetId, fileAssetId }) => ({
@@ -441,13 +457,6 @@ export class IntegrityService extends BaseService {
     // and only writes rows that actually change state, so repeated scans cause no sync churn.
     const nowOfflineAssetIds = missingFiles.filter(({ assetId }) => assetId).map(({ assetId }) => assetId!);
     await this.assetRepository.setUploadAssetsOffline(nowOfflineAssetIds, true);
-
-    // An original whose file has returned (it exists again and still has an open report) is
-    // brought back online in the same pass, mirroring the library scan's clear-on-return.
-    const backOnlineAssetIds = results
-      .filter(({ exists, reportId, assetId }) => exists && reportId && assetId)
-      .map(({ assetId }) => assetId!);
-    await this.assetRepository.setUploadAssetsOffline(backOnlineAssetIds, false);
 
     this.logger.debugFn(
       () =>

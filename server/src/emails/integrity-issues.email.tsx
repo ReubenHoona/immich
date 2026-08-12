@@ -33,7 +33,7 @@ export const IntegrityIssuesEmail = ({
 
       <Text>
         A missing file means the database has a record whose file is gone from disk. If the photo still exists on a
-        device, resetting it for re-upload from the maintenance page will bring it back on the next backup run.
+        device running the Immich app, it will be restored in place automatically on the next backup run.
       </Text>
     </>
   );

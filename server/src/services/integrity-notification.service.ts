@@ -87,15 +87,24 @@ export class IntegrityNotificationService extends BaseService {
       baseUrl: getExternalDomain(config.server),
     };
 
+    let delivered = 0;
     for (const channel of this.channels) {
       if (!channel.isEnabled(config)) {
         continue;
       }
       try {
         await channel.send(payload);
+        delivered++;
       } catch (error: Error | any) {
         this.logger.error(`Failed to send integrity findings via ${channel.name} channel: ${error}`, error?.stack);
       }
+    }
+
+    // Nothing went out — leave the watermark alone so the next run re-announces this window
+    // instead of silently swallowing it, and fail the job so the error is visible.
+    if (delivered === 0) {
+      this.logger.error(`Integrity findings could not be delivered on any channel; will retry on the next run`);
+      return JobStatus.Failed;
     }
 
     // advance the watermark to the newest row we counted (not now()), so findings

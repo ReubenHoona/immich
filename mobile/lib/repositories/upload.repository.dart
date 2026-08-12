@@ -137,6 +137,14 @@ class UploadRepository {
       final responseBodyString = await response.stream.bytesToString();
 
       if (![200, 201].contains(response.statusCode)) {
+        // A repeated or stale restore can arrive after the asset was already healed (an earlier
+        // run, another device, or the file returned on its own). The server's 409 means the
+        // original is present and nothing is needed from this device — success, not failure.
+        if (restoreAssetId != null && response.statusCode == 409) {
+          logger.info("Original for asset $restoreAssetId is already present on the server; nothing to restore");
+          return UploadResult.success(remoteAssetId: restoreAssetId);
+        }
+
         String? errorMessage;
 
         if (response.statusCode == 413) {

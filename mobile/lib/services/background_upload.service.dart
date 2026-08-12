@@ -191,6 +191,7 @@ class BackgroundUploadService {
     switch (update.status) {
       case TaskStatus.complete:
         unawaited(_handleLivePhoto(update));
+        unawaited(_handleRestoreOutcome(update.task));
 
         if (CurrentPlatform.isIOS) {
           try {
@@ -201,8 +202,34 @@ class BackgroundUploadService {
           }
         }
 
+      case TaskStatus.failed:
+        // A persisted restore task can run long after enqueue and land on an asset that was
+        // already healed; the server's 409 (original already present) needs nothing from this
+        // device, so mirror the healed state instead of leaving a stale candidate.
+        final exception = update.exception;
+        if (exception is TaskHttpException && exception.httpResponseCode == 409) {
+          unawaited(_handleRestoreOutcome(update.task));
+        }
+
       default:
         break;
+    }
+  }
+
+  /// When a heal-in-place restore task (PUT /assets/:id/original) reaches the server, write
+  /// isOffline=false locally so backup runs before the next sync pass skip the asset.
+  Future<void> _handleRestoreOutcome(Task task) async {
+    if (task.httpRequestMethod != 'PUT') {
+      return;
+    }
+    final segments = Uri.parse(task.url).pathSegments;
+    if (segments.length < 3 || segments.last != 'original' || segments[segments.length - 3] != 'assets') {
+      return;
+    }
+    try {
+      await _backupRepository.markRemoteAssetOnline(segments[segments.length - 2]);
+    } catch (error, stackTrace) {
+      _logger.severe('Error marking restored asset online: $error', stackTrace);
     }
   }
 

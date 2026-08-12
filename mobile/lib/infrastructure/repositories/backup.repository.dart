@@ -6,6 +6,7 @@ import 'package:immich_mobile/data/db/main/table/local/album_asset.drift.dart';
 import 'package:immich_mobile/data/db/main/table/local/asset.dart';
 import 'package:immich_mobile/domain/models/album/local_album.model.dart';
 import 'package:immich_mobile/domain/models/asset/base_asset.model.dart';
+import 'package:immich_mobile/data/db/main/table/remote/asset.drift.dart';
 import 'package:immich_mobile/infrastructure/repositories/backup.repository.drift.dart';
 
 @DriftAccessor()
@@ -43,7 +44,7 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
         FROM local_asset_entity lae
         LEFT JOIN main.remote_asset_entity rae
             ON lae.checksum = rae.checksum AND rae.owner_id = ?1
-            AND (rae.is_offline = 0 OR rae.library_id IS NOT NULL)
+            AND (rae.is_offline = 0 OR rae.library_id IS NOT NULL OR rae.deleted_at IS NOT NULL)
         WHERE EXISTS (
             SELECT 1
             FROM local_album_asset_entity laa
@@ -109,10 +110,14 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
             ..where(
               _db.remoteAssetEntity.checksum.equalsExp(lae.checksum) &
                   _db.remoteAssetEntity.ownerId.equals(userId) &
-                  // A row still "counts as present" unless it is an offline UPLOAD asset
-                  // (libraryId IS NULL). Offline external-library assets stay excluded — the
-                  // phone must never re-upload externally-managed files.
-                  (_db.remoteAssetEntity.isOffline.equals(false) | _db.remoteAssetEntity.libraryId.isNotNull()),
+                  // A row still "counts as present" unless it is an offline, non-trashed UPLOAD
+                  // asset (libraryId IS NULL). Offline external-library assets stay excluded — the
+                  // phone must never re-upload externally-managed files. Trashed rows also count
+                  // as present: the server refuses to restore a trashed asset, so re-uploading
+                  // would just fail on the checksum constraint anyway.
+                  (_db.remoteAssetEntity.isOffline.equals(false) |
+                      _db.remoteAssetEntity.libraryId.isNotNull() |
+                      _db.remoteAssetEntity.deletedAt.isNotNull()),
             ),
         ) &
         lae.id.isNotInQuery(_getExcludedSubquery());
@@ -127,7 +132,9 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
         offlineRemote.checksum.equalsExp(lae.checksum) &
             offlineRemote.ownerId.equals(userId) &
             offlineRemote.isOffline.equals(true) &
-            offlineRemote.libraryId.isNull(),
+            offlineRemote.libraryId.isNull() &
+            // never heal a trashed asset in place — the server rejects the restore
+            offlineRemote.deletedAt.isNull(),
       ),
     ])
       ..where(predicate)
@@ -137,5 +144,13 @@ class BackupRepository extends DatabaseAccessor<Drift> with $BackupRepositoryMix
     // A non-null joined id is the offline asset to heal in place (upload targets
     // PUT /assets/:id/original); a null id is a fresh candidate that uploads via POST /assets.
     return rows.map((row) => row.readTable(lae).toDto(remoteId: row.readTableOrNull(offlineRemote)?.id)).toList();
+  }
+
+  /// Mirror a successful in-place restore locally so the asset stops being a restore
+  /// candidate immediately, without waiting for the next sync pass to deliver isOffline=false.
+  Future<void> markRemoteAssetOnline(String remoteAssetId) {
+    return (_db.update(_db.remoteAssetEntity)..where((rae) => rae.id.equals(remoteAssetId))).write(
+      const RemoteAssetEntityCompanion(isOffline: Value(false)),
+    );
   }
 }

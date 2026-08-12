@@ -70,6 +70,29 @@ describe(IntegrityService.name, () => {
       expect(mocks.asset.setUploadAssetsOffline).toHaveBeenCalledWith(['asset-1'], false);
       expect(mocks.integrityReport.create).not.toHaveBeenCalled();
     });
+
+    it('should clear the offline flag before deleting the stale report', async () => {
+      mocks.storage.stat.mockResolvedValue({} as never);
+
+      await sut.handleMissingFiles({
+        items: [{ path: '/data/upload/photo.jpg', assetId: 'asset-1', fileAssetId: null, reportId: 'report-1' }],
+      });
+
+      const clearOrder = mocks.asset.setUploadAssetsOffline.mock.invocationCallOrder[0];
+      const deleteOrder = mocks.integrityReport.deleteByIds.mock.invocationCallOrder[0];
+      expect(clearOrder).toBeLessThan(deleteOrder);
+    });
+
+    it('should not treat a non-ENOENT stat error as a missing file', async () => {
+      mocks.storage.stat.mockRejectedValue(Object.assign(new Error('permission denied'), { code: 'EACCES' }));
+
+      await sut.handleMissingFiles({
+        items: [{ path: '/data/upload/photo.jpg', assetId: 'asset-1', fileAssetId: null, reportId: null }],
+      });
+
+      expect(mocks.integrityReport.create).not.toHaveBeenCalled();
+      expect(mocks.asset.setUploadAssetsOffline).not.toHaveBeenCalledWith(['asset-1'], true);
+    });
   });
 
   describe('handleMissingRefresh', () => {

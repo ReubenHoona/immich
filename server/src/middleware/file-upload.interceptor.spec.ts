@@ -1,13 +1,13 @@
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
-import { Readable } from 'node:stream';
 import { FileUploadInterceptor } from 'src/middleware/file-upload.interceptor';
 import { Mocked, vitest } from 'vitest';
 
 describe(FileUploadInterceptor.name, () => {
   let sut: FileUploadInterceptor;
   let assetService: { getUploadVerificationConfig: Mocked<any>; canUploadFile: Mocked<any> };
-  let storageRepository: { stat: Mocked<any>; createPlainReadStream: Mocked<any>; unlink: Mocked<any> };
+  let storageRepository: { stat: Mocked<any>; unlink: Mocked<any> };
+  let cryptoRepository: { hashFile: Mocked<any> };
 
   const logger = {
     setContext: vitest.fn(),
@@ -19,10 +19,22 @@ describe(FileUploadInterceptor.name, () => {
   const verify = (path: string, size: number, checksum?: Buffer) =>
     (sut as any).verifyWrittenFile(path, size, checksum) as Promise<void>;
 
+  const fail = (path: string, error: Error) =>
+    new Promise<Error>((resolve) => (sut as any).failUpload(path, error, resolve));
+
+  const getHandler = (route: string, endpoint?: string) => (sut as any).getHandler(route, endpoint);
+
   beforeEach(() => {
     assetService = { getUploadVerificationConfig: vitest.fn(), canUploadFile: vitest.fn() };
-    storageRepository = { stat: vitest.fn(), createPlainReadStream: vitest.fn(), unlink: vitest.fn() };
-    sut = new FileUploadInterceptor(new Reflector(), assetService as any, storageRepository as any, logger as any);
+    storageRepository = { stat: vitest.fn(), unlink: vitest.fn().mockResolvedValue(undefined) };
+    cryptoRepository = { hashFile: vitest.fn() };
+    sut = new FileUploadInterceptor(
+      new Reflector(),
+      assetService as any,
+      storageRepository as any,
+      cryptoRepository as any,
+      logger as any,
+    );
   });
 
   describe('verifyWrittenFile', () => {
@@ -60,7 +72,7 @@ describe(FileUploadInterceptor.name, () => {
       const checksum = createHash('sha1').update(content).digest();
       assetService.getUploadVerificationConfig.mockResolvedValue({ size: true, rehash: true });
       storageRepository.stat.mockResolvedValue({ size: content.length });
-      storageRepository.createPlainReadStream.mockReturnValue(Readable.from([content]));
+      cryptoRepository.hashFile.mockResolvedValue(checksum);
 
       await expect(verify('/upload/file.jpg', content.length, checksum)).resolves.toBeUndefined();
     });
@@ -70,9 +82,38 @@ describe(FileUploadInterceptor.name, () => {
       const wrongChecksum = createHash('sha1').update('something else').digest();
       assetService.getUploadVerificationConfig.mockResolvedValue({ size: true, rehash: true });
       storageRepository.stat.mockResolvedValue({ size: content.length });
-      storageRepository.createPlainReadStream.mockReturnValue(Readable.from([content]));
+      cryptoRepository.hashFile.mockResolvedValue(createHash('sha1').update(content).digest());
 
       await expect(verify('/upload/file.jpg', content.length, wrongChecksum)).rejects.toThrow('checksum mismatch');
+    });
+  });
+
+  describe('failUpload', () => {
+    it('should unlink the written file before propagating the error', async () => {
+      const error = new Error('verification failed');
+
+      await expect(fail('/upload/file.jpg', error)).resolves.toBe(error);
+
+      expect(storageRepository.unlink).toHaveBeenCalledWith('/upload/file.jpg');
+    });
+
+    it('should still propagate the error when the unlink itself fails', async () => {
+      storageRepository.unlink.mockRejectedValue(new Error('EACCES'));
+      const error = new Error('verification failed');
+
+      await expect(fail('/upload/file.jpg', error)).resolves.toBe(error);
+
+      expect(logger.warn).toHaveBeenCalled();
+    });
+  });
+
+  describe('getHandler', () => {
+    it('should use the restore handler (no sidecar field) for the restore endpoint', () => {
+      expect(getHandler('assets', ':id/original')).toBe((sut as any).handlers.assetRestore);
+    });
+
+    it('should use the standard asset handler for other asset endpoints', () => {
+      expect(getHandler('assets')).toBe((sut as any).handlers.assetUpload);
     });
   });
 });

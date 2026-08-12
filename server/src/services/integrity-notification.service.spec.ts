@@ -145,17 +145,29 @@ describe(IntegrityNotificationService.name, () => {
       );
     });
 
-    it('should still advance the watermark when a channel fails', async () => {
+    it('should still advance the watermark when one channel fails but another delivers', async () => {
       const latest = '2026-08-09 03:00:05.999999+00';
-      withState({});
+      withState(smtpEnabledConfig);
       mocks.integrityReport.getNewFindingCounts.mockResolvedValue({ counts: counts(1), total: 1, latest });
       mocks.notification.create.mockRejectedValue(new Error('boom'));
+      mocks.email.renderEmail.mockResolvedValue({ html: '<p>hi</p>', text: 'hi' });
 
       await expect(sut.handleIntegrityNotify()).resolves.toBe(JobStatus.Success);
 
       expect(mocks.systemMetadata.set).toHaveBeenCalledWith(SystemMetadataKey.IntegrityNotificationState, {
         lastNotifiedAt: latest,
       });
+    });
+
+    it('should not advance the watermark when every channel fails, so the window is re-announced', async () => {
+      const latest = '2026-08-09 03:00:05.999999+00';
+      withState({});
+      mocks.integrityReport.getNewFindingCounts.mockResolvedValue({ counts: counts(1), total: 1, latest });
+      mocks.notification.create.mockRejectedValue(new Error('boom'));
+
+      await expect(sut.handleIntegrityNotify()).resolves.toBe(JobStatus.Failed);
+
+      expect(mocks.systemMetadata.set).not.toHaveBeenCalled();
     });
   });
 });
