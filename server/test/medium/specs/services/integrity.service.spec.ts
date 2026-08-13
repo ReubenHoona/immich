@@ -357,7 +357,7 @@ describe(IntegrityService.name, () => {
         path: '/path/to/existing',
       });
 
-      storage.stat.mockRejectedValueOnce(new Error('ENOENT')).mockResolvedValueOnce({} as never);
+      storage.stat.mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' })).mockResolvedValueOnce({} as never);
 
       await sut.handleUntrackedRefresh({
         items: [
@@ -486,7 +486,7 @@ describe(IntegrityService.name, () => {
 
       storage.stat
         .mockResolvedValueOnce({} as never)
-        .mockRejectedValueOnce(new Error('ENOENT'))
+        .mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
         .mockResolvedValueOnce({} as never);
 
       await sut.handleMissingFiles({
@@ -533,7 +533,7 @@ describe(IntegrityService.name, () => {
 
       storage.stat
         .mockResolvedValueOnce({} as never)
-        .mockRejectedValueOnce(new Error('ENOENT'))
+        .mockRejectedValueOnce(Object.assign(new Error('ENOENT'), { code: 'ENOENT' }))
         .mockResolvedValueOnce({} as never);
 
       await sut.handleMissingRefresh({
@@ -667,7 +667,7 @@ describe(IntegrityService.name, () => {
 
       await ctx.newAsset({ ownerId, originalPath: '/path/to/file1', checksum: Buffer.from('a') });
 
-      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      const error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException;
       error.code = 'ENOENT';
       storage.createPlainReadStream.mockImplementation(() => {
         throw error;
@@ -784,7 +784,7 @@ describe(IntegrityService.name, () => {
         path: '/path/to/missing-asset',
       });
 
-      const error = new Error('ENOENT') as NodeJS.ErrnoException;
+      const error = Object.assign(new Error('ENOENT'), { code: 'ENOENT' }) as NodeJS.ErrnoException;
       error.code = 'ENOENT';
 
       storage.createPlainReadStream

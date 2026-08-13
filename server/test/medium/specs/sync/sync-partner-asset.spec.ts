@@ -61,7 +61,6 @@ describe(SyncRequestType.PartnerAssetsV2, () => {
           fileModifiedAt: date,
           createdAt: date,
           isFavorite: false,
-          isOffline: asset.isOffline,
           localDateTime: date,
           type: asset.type,
           visibility: asset.visibility,
