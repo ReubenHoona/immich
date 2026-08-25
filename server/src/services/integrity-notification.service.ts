@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { SystemConfig } from 'src/config';
 import { UserAdmin } from 'src/database';
 import { OnJob } from 'src/decorators';
+import { SystemConfig } from 'src/dtos/config.dto';
 import { mapNotification } from 'src/dtos/notification.dto';
 import {
   IntegrityReport,

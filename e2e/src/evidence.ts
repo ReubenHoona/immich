@@ -79,7 +79,7 @@ export const snapshotAssetGraph = async (client: Client, assetId: string): Promi
 
   const faces = await many(
     client,
-    `SELECT id, "personId", "boundingBoxX1", "boundingBoxY1", "boundingBoxX2", "boundingBoxY2",
+    `SELECT id, "personGroupId", "boundingBoxX1", "boundingBoxY1", "boundingBoxX2", "boundingBoxY2",
             "sourceType", "isVisible", "updateId"
      FROM asset_face
      WHERE "assetId" = $1

@@ -154,10 +154,24 @@ export type AdminConfigIntegrityJobDto = {
     /** Enabled */
     enabled: boolean;
 };
+export type AdminConfigIntegrityNotificationsDto = {
+    /** Cron expression for when integrity findings are announced */
+    cronExpression: string;
+    /** Enabled */
+    enabled: boolean;
+};
+export type AdminConfigIntegrityUploadVerificationDto = {
+    /** Re-read and re-hash every upload from disk before acknowledging it */
+    rehash: boolean;
+    /** Verify the on-disk size of every upload before acknowledging it */
+    size: boolean;
+};
 export type AdminConfigIntegrityChecksDto = {
     checksumFiles: AdminConfigIntegrityChecksumJobDto;
     missingFiles: AdminConfigIntegrityJobDto;
+    notifications: AdminConfigIntegrityNotificationsDto;
     untrackedFiles: AdminConfigIntegrityJobDto;
+    uploadVerification: AdminConfigIntegrityUploadVerificationDto;
 };
 export type AdminConfigJobSettingsDto = {
     /** Concurrency */
@@ -452,6 +466,8 @@ export type DatabaseBackupUploadDto = {
 };
 export type IntegrityReportResponseDto = {
     items: {
+        /** Linked asset id, if the item refers to an asset */
+        assetId: string | null;
         /** Integrity report item id */
         id: string;
         /** Integrity report item path */
@@ -1412,6 +1428,10 @@ export type AssetOcrResponseDto = {
     y3: number;
     /** Normalized y coordinate of box corner 4 (0-1) */
     y4: number;
+};
+export type AssetMediaRestoreDto = {
+    /** Asset file data */
+    assetData: Blob;
 };
 export type SignUpDto = {
     /** User email */
@@ -3377,6 +3397,8 @@ export type SyncAssetV2 = {
     isEdited: boolean;
     /** Is favorite */
     isFavorite: boolean;
+    /** Whether the original file is currently missing on the server */
+    isOffline?: boolean | null;
     /** Library ID */
     libraryId: string | null;
     /** Live photo video ID */
@@ -4710,6 +4732,22 @@ export function downloadAsset({ edited, id, key, slug }: {
     }))}`, {
         ...opts
     }));
+}
+/**
+ * Restore a missing original in place
+ */
+export function restoreAssetOriginal({ id, assetMediaRestoreDto }: {
+    id: string;
+    assetMediaRestoreDto: AssetMediaRestoreDto;
+}, opts?: Oazapfts.RequestOpts) {
+    return oazapfts.ok(oazapfts.fetchJson<{
+        status: 200;
+        data: AssetMediaResponseDto;
+    }>(`/assets/${encodeURIComponent(id)}/original`, oazapfts.multipart({
+        ...opts,
+        method: "PUT",
+        body: assetMediaRestoreDto
+    })));
 }
 /**
  * View asset thumbnail
@@ -7685,6 +7723,7 @@ export enum NotificationLevel {
 export enum NotificationType {
     JobFailed = "JobFailed",
     BackupFailed = "BackupFailed",
+    IntegrityIssues = "IntegrityIssues",
     SystemMessage = "SystemMessage",
     AlbumInvite = "AlbumInvite",
     AlbumUpdate = "AlbumUpdate",
@@ -7901,7 +7940,8 @@ export enum AssetFileType {
 }
 export enum AssetMediaStatus {
     Created = "created",
-    Duplicate = "duplicate"
+    Duplicate = "duplicate",
+    Restored = "restored"
 }
 export enum AssetUploadAction {
     Accept = "accept",
@@ -7958,7 +7998,8 @@ export enum ManualJobName {
     IntegrityChecksumMismatchRefresh = "integrity-checksum-mismatch-refresh",
     IntegrityMissingFilesDeleteAll = "integrity-missing-files-delete-all",
     IntegrityUntrackedFilesDeleteAll = "integrity-untracked-files-delete-all",
-    IntegrityChecksumMismatchDeleteAll = "integrity-checksum-mismatch-delete-all"
+    IntegrityChecksumMismatchDeleteAll = "integrity-checksum-mismatch-delete-all",
+    IntegrityNotifications = "integrity-notifications"
 }
 export enum QueueName {
     ThumbnailGeneration = "thumbnailGeneration",
@@ -8082,7 +8123,8 @@ export enum JobName {
     IntegrityChecksumFiles = "IntegrityChecksumFiles",
     IntegrityChecksumFilesRefresh = "IntegrityChecksumFilesRefresh",
     IntegrityDeleteReportType = "IntegrityDeleteReportType",
-    IntegrityDeleteReports = "IntegrityDeleteReports"
+    IntegrityDeleteReports = "IntegrityDeleteReports",
+    IntegrityNotify = "IntegrityNotify"
 }
 export enum SearchSuggestionType {
     Country = "country",

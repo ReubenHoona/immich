@@ -1,5 +1,5 @@
-import { defaults, SystemConfig } from 'src/config';
 import { UserAdmin } from 'src/database';
+import { defaults, SystemConfig } from 'src/dtos/config.dto';
 import { IntegrityReport, JobName, JobStatus, NotificationType, SystemMetadataKey } from 'src/enum';
 import { describeFindings, IntegrityNotificationService } from 'src/services/integrity-notification.service';
 import { newTestService, ServiceMocks } from 'test/utils';

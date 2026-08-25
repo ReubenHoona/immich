@@ -98,7 +98,7 @@ const updatedConfig = Object.freeze<SystemConfig>({
     },
     notifications: {
       enabled: true,
-      cronExpression: '0 5 * * *',
+      cronExpression: '0 05 * * *',
     },
     uploadVerification: {
       size: true,

@@ -5021,6 +5021,72 @@
         ],
         "x-immich-permission": "asset.download",
         "x-immich-state": "Stable"
+      },
+      "put": {
+        "description": "Restores the original file of an offline asset in place, accepting the bytes only when they hash to the checksum the server already recorded. The asset id and every attached record are preserved (no delete, no re-upload).",
+        "operationId": "restoreAssetOriginal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/AssetMediaRestoreDto"
+              }
+            }
+          },
+          "description": "Asset restore data",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AssetMediaResponseDto"
+                }
+              }
+            },
+            "description": "Missing original restored in place"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "cookie": []
+          },
+          {
+            "api_key": []
+          }
+        ],
+        "summary": "Restore a missing original in place",
+        "tags": [
+          "Assets"
+        ],
+        "x-immich-history": [
+          {
+            "version": "v3.1.0",
+            "state": "Added"
+          },
+          {
+            "version": "v3.1.0",
+            "state": "Alpha"
+          }
+        ],
+        "x-immich-permission": "asset.update",
+        "x-immich-state": "Alpha"
       }
     },
     "/assets/{id}/thumbnail": {
@@ -18186,14 +18252,22 @@
           "missingFiles": {
             "$ref": "#/components/schemas/AdminConfigIntegrityJobDto"
           },
+          "notifications": {
+            "$ref": "#/components/schemas/AdminConfigIntegrityNotificationsDto"
+          },
           "untrackedFiles": {
             "$ref": "#/components/schemas/AdminConfigIntegrityJobDto"
+          },
+          "uploadVerification": {
+            "$ref": "#/components/schemas/AdminConfigIntegrityUploadVerificationDto"
           }
         },
         "required": [
           "checksumFiles",
           "missingFiles",
-          "untrackedFiles"
+          "notifications",
+          "untrackedFiles",
+          "uploadVerification"
         ],
         "type": "object"
       },
@@ -18245,6 +18319,42 @@
         "required": [
           "cronExpression",
           "enabled"
+        ],
+        "type": "object"
+      },
+      "AdminConfigIntegrityNotificationsDto": {
+        "description": "Integrity notifications config",
+        "properties": {
+          "cronExpression": {
+            "description": "Cron expression for when integrity findings are announced",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cronExpression",
+          "enabled"
+        ],
+        "type": "object"
+      },
+      "AdminConfigIntegrityUploadVerificationDto": {
+        "description": "Upload verification config",
+        "properties": {
+          "rehash": {
+            "description": "Re-read and re-hash every upload from disk before acknowledging it",
+            "type": "boolean"
+          },
+          "size": {
+            "description": "Verify the on-disk size of every upload before acknowledging it",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "rehash",
+          "size"
         ],
         "type": "object"
       },
@@ -20079,6 +20189,19 @@
         ],
         "type": "object"
       },
+      "AssetMediaRestoreDto": {
+        "properties": {
+          "assetData": {
+            "description": "Asset file data",
+            "format": "binary",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assetData"
+        ],
+        "type": "object"
+      },
       "AssetMediaSize": {
         "description": "Asset media size",
         "enum": [
@@ -20093,7 +20216,8 @@
         "description": "Upload status",
         "enum": [
           "created",
-          "duplicate"
+          "duplicate",
+          "restored"
         ],
         "type": "string"
       },
@@ -21670,6 +21794,13 @@
           "items": {
             "items": {
               "properties": {
+                "assetId": {
+                  "description": "Linked asset id, if the item refers to an asset",
+                  "format": "uuid",
+                  "nullable": true,
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12})$",
+                  "type": "string"
+                },
                 "id": {
                   "description": "Integrity report item id",
                   "format": "uuid",
@@ -21687,7 +21818,8 @@
               "required": [
                 "id",
                 "type",
-                "path"
+                "path",
+                "assetId"
               ],
               "type": "object"
             },
@@ -21806,7 +21938,8 @@
           "IntegrityChecksumFiles",
           "IntegrityChecksumFilesRefresh",
           "IntegrityDeleteReportType",
-          "IntegrityDeleteReports"
+          "IntegrityDeleteReports",
+          "IntegrityNotify"
         ],
         "type": "string"
       },
@@ -22157,7 +22290,8 @@
           "integrity-checksum-mismatch-refresh",
           "integrity-missing-files-delete-all",
           "integrity-untracked-files-delete-all",
-          "integrity-checksum-mismatch-delete-all"
+          "integrity-checksum-mismatch-delete-all",
+          "integrity-notifications"
         ],
         "type": "string"
       },
@@ -22912,6 +23046,7 @@
         "enum": [
           "JobFailed",
           "BackupFailed",
+          "IntegrityIssues",
           "SystemMessage",
           "AlbumInvite",
           "AlbumUpdate",
@@ -27324,6 +27459,11 @@
           },
           "isFavorite": {
             "description": "Is favorite",
+            "type": "boolean"
+          },
+          "isOffline": {
+            "description": "Whether the original file is currently missing on the server",
+            "nullable": true,
             "type": "boolean"
           },
           "libraryId": {

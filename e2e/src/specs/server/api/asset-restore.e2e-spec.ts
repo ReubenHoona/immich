@@ -215,7 +215,7 @@ describe('/assets/:id/original (missing-file self-healing)', () => {
     try {
       // --- attach the full graph of FK data --------------------------------------------------
       const person = await utils.createPerson(admin.accessToken, { name: 'Restore Subject' });
-      await utils.createFace({ assetId: asset.id, personId: person.id });
+      await utils.createFace({ assetId: asset.id, personGroupId: person.id });
 
       const [tag] = await utils.upsertTags(admin.accessToken, ['restore/kept-tag']);
       await utils.tagAssets(admin.accessToken, tag.id, [asset.id]);
