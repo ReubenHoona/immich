@@ -20,6 +20,7 @@ import 'package:immich_mobile/providers/infrastructure/platform.provider.dart';
 import 'package:immich_mobile/providers/infrastructure/storage.provider.dart';
 import 'package:immich_mobile/repositories/asset_media.repository.dart';
 import 'package:immich_mobile/repositories/upload.repository.dart';
+import 'package:immich_mobile/utils/upload_eta_gate.dart';
 import 'package:logging/logging.dart';
 import 'package:openapi/api.dart';
 import 'package:path/path.dart' as p;
@@ -57,14 +58,20 @@ class ForegroundUploadService {
     this._storageRepository,
     this._backupRepository,
     this._connectivityApi,
-    this._assetMediaRepository,
-  );
+    this._assetMediaRepository, {
+    UploadEtaGate? etaGate,
+  }) : _etaGate = etaGate ?? UploadEtaGate();
 
   final UploadRepository _uploadRepository;
   final StorageRepository _storageRepository;
   final BackupRepository _backupRepository;
   final ConnectivityApi _connectivityApi;
   final AssetMediaRepository _assetMediaRepository;
+
+  /// Admission control for the worker pool: a further upload only starts once
+  /// every upload in flight has a measured ETA under the gate's limit, so large
+  /// files get the whole link instead of sharing it three ways.
+  final UploadEtaGate _etaGate;
   final Logger _logger = Logger('ForegroundUploadService');
 
   bool shouldAbortUpload = false;
@@ -99,6 +106,7 @@ class ForegroundUploadService {
       await _executeWithWorkerPool<LocalAsset>(
         items: candidates,
         cancelToken: cancelToken,
+        itemId: (asset) => asset.localId!,
         shouldSkip: (asset) {
           final requireWifi = _shouldRequireWiFi(asset);
           return requireWifi && !hasWifi;
@@ -146,6 +154,7 @@ class ForegroundUploadService {
     await _executeWithWorkerPool<LocalAsset>(
       items: localAssets,
       cancelToken: cancelToken,
+      itemId: (asset) => asset.localId!,
       processItem: (asset) => uploadSingleAsset(asset, cancelToken, callbacks: callbacks),
     );
   }
@@ -164,8 +173,9 @@ class ForegroundUploadService {
     await _executeWithWorkerPool<File>(
       items: files,
       cancelToken: cancelToken,
+      itemId: _shareIntentFileId,
       processItem: (file) async {
-        final fileId = p.hash(file.path).toString();
+        final fileId = _shareIntentFileId(file);
 
         final result = await _uploadSingleFile(
           file,
@@ -187,17 +197,24 @@ class ForegroundUploadService {
     shouldAbortUpload = true;
   }
 
+  static String _shareIntentFileId(File file) => p.hash(file.path).toString();
+
   /// Generic worker pool for concurrent uploads
   ///
   /// [items] - List of items to process
   /// [cancelToken] - Token to cancel the operation
   /// [processItem] - Function to process each item with an HTTP client
+  /// [itemId] - Stable id of an item; must match the id its progress is reported under
   /// [shouldSkip] - Optional function to skip items (e.g., WiFi requirement check)
   /// [concurrentWorkers] - Number of concurrent workers (default: 3)
+  ///
+  /// Workers only take the next item once [_etaGate] admits it: every upload
+  /// already in flight must have a measured ETA under the gate's limit.
   Future<void> _executeWithWorkerPool<T>({
     required List<T> items,
     required Completer<void>? cancelToken,
     required Future<void> Function(T item) processItem,
+    required String Function(T item) itemId,
     bool Function(T item)? shouldSkip,
     int concurrentWorkers = 3,
   }) async {
@@ -205,15 +222,30 @@ class ForegroundUploadService {
     shouldAbortUpload = false;
 
     int currentIndex = 0;
+    bool isCancelled() => shouldAbortUpload || (cancelToken != null && cancelToken.isCompleted);
 
     Future<void> worker() async {
       while (true) {
-        if (shouldAbortUpload || (cancelToken != null && cancelToken.isCompleted)) {
+        if (isCancelled() || currentIndex >= items.length) {
           break;
+        }
+
+        // Wait for a slot before claiming an item, so the queue keeps its order
+        // instead of pre-assigned items racing each other at the gate.
+        if (!_etaGate.canAdmit) {
+          _logger.fine('Holding the next upload until in-flight uploads are near done (${_etaGate.describe()})');
+        }
+        if (!await _etaGate.waitForAdmission(isCancelled: isCancelled)) {
+          break;
+        }
+        if (!_etaGate.tryReserve()) {
+          // Another worker took this opening while we were resuming.
+          continue;
         }
 
         final index = currentIndex;
         if (index >= items.length) {
+          _etaGate.cancelReservation();
           break;
         }
         currentIndex++;
@@ -221,10 +253,17 @@ class ForegroundUploadService {
         final item = items[index];
 
         if (shouldSkip?.call(item) ?? false) {
+          _etaGate.cancelReservation();
           continue;
         }
 
-        await processItem(item);
+        final id = itemId(item);
+        _etaGate.begin(id);
+        try {
+          await processItem(item);
+        } finally {
+          _etaGate.release(id);
+        }
       }
     }
 
@@ -334,9 +373,10 @@ class ForegroundUploadService {
           // Visibility hidden on upload to prevent the server from running regular jobs on the live photo asset
           fields: {...fields, 'visibility': AssetVisibility.hidden.toString()},
           cancelToken: cancelToken,
-          onProgress: onProgress != null
-              ? (bytes, totalBytes) => onProgress(asset.localId!, livePhotoTitle, bytes, totalBytes)
-              : null,
+          onProgress: (bytes, totalBytes) {
+            _etaGate.progress(asset.localId!, bytes, totalBytes);
+            onProgress?.call(asset.localId!, livePhotoTitle, bytes, totalBytes);
+          },
           logContext: 'livePhotoVideo[${asset.localId}]',
         );
 
@@ -371,9 +411,10 @@ class ForegroundUploadService {
         originalFileName: originalFileName,
         fields: fields,
         cancelToken: cancelToken,
-        onProgress: onProgress != null
-            ? (bytes, totalBytes) => onProgress(asset.localId!, originalFileName, bytes, totalBytes)
-            : null,
+        onProgress: (bytes, totalBytes) {
+          _etaGate.progress(asset.localId!, bytes, totalBytes);
+          onProgress?.call(asset.localId!, originalFileName, bytes, totalBytes);
+        },
         logContext: 'asset[${asset.localId}]',
       );
 
@@ -436,7 +477,10 @@ class ForegroundUploadService {
         originalFileName: filename,
         fields: fields,
         cancelToken: cancelToken,
-        onProgress: onProgress,
+        onProgress: (bytes, totalBytes) {
+          _etaGate.progress(deviceAssetId, bytes, totalBytes);
+          onProgress?.call(bytes, totalBytes);
+        },
         logContext: 'shareIntent[$deviceAssetId]',
       );
     } catch (e) {
